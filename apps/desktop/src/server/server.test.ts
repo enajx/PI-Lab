@@ -1,12 +1,26 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createTRPCClient, createWSClient, wsLink } from "@trpc/client"
-import superjson from "superjson"
+import { DaemonServer } from "@pi-lab/pty-daemon"
+import { createTRPCClient, createWSClient, TRPCClientError, wsLink } from "@trpc/client"
 import { afterAll, beforeAll, expect, test, vi } from "vitest"
 import { WebSocket } from "ws"
+import { z } from "zod"
 import type { ServerRouter } from "../main/trpc/serverRouter"
+import {
+  appSettingsSchema,
+  backgroundTraySnapshotSchema,
+  legacyCredentialSchema,
+  notebookCountSchema,
+  notificationEventSchema,
+  notificationStreamMessageSchema,
+  projectFileRouteSchema,
+  quitWorkSchema,
+  secretProtectionSchema,
+  serverHelloSchema,
+} from "../shared/clientApi"
 import { ensureLocalToken, proveServerIdentity, TOKEN_FILE, TOKEN_HEADER } from "./access"
+import { DEVICES_FILE } from "./devices"
 import { type ListeningServer, listen } from "./http"
 import type { ServerRuntime } from "./runtime"
 
@@ -20,11 +34,15 @@ let dataDir: string
 let runtime: ServerRuntime
 let server: ListeningServer
 let token: string
+let daemonServer: DaemonServer
 
 beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "pi-lab-server-test-"))
   process.env.PI_LAB_DATA_DIR = dataDir
   process.env.PI_LAB_SOCKET_PATH = join(dataDir, "daemon.sock")
+  // A real PTY daemon in this process; the server adopts it as a running daemon.
+  daemonServer = new DaemonServer({ socketPath: process.env.PI_LAB_SOCKET_PATH })
+  await daemonServer.listen()
   const { ServerRuntime } = await import("./runtime")
   runtime = new ServerRuntime({
     dataDir,
@@ -40,7 +58,9 @@ beforeAll(async () => {
   token = ensureLocalToken(dataDir)
   server = await listen({
     port: 0,
-    token,
+    access: runtime.devices,
+    localToken: token,
+    testRoutes: false,
     createContext: () => ({
       ...runtime.createAppContext(),
       server: { runtime, exit: () => undefined },
@@ -52,6 +72,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await server?.close()
   runtime?.dispose()
+  await daemonServer?.close()
   rmSync(dataDir, { recursive: true, force: true })
 })
 
@@ -63,7 +84,7 @@ function connect(presented: string) {
   })
   return {
     client: createTRPCClient<ServerRouter>({
-      links: [wsLink({ client: socket, transformer: superjson })],
+      links: [wsLink({ client: socket })],
     }),
     close: () => socket.close(),
   }
@@ -73,6 +94,7 @@ test("a client with the local token gets the hello and project data over loopbac
   const { client, close } = connect(token)
   const hello = await client.server.hello.query()
   expect(hello).toMatchObject({ protocol: 1, build: "test-build", version: "0.0.0-test" })
+  expect(hello.capabilities).toEqual(["devices", "launch-ids", "answer-request"])
   expect(await client.projects.list.query()).toEqual([])
   close()
 })
@@ -81,13 +103,22 @@ test("the local token file is readable by its owner only", () => {
   expect(statSync(join(dataDir, TOKEN_FILE)).mode & 0o777).toBe(0o600)
 })
 
-test("a WebSocket upgrade with a wrong token is refused before any call", async () => {
-  const status = await new Promise<number>((resolve) => {
-    const socket = new WebSocket(`ws://127.0.0.1:${server.port}/trpc?token=wrong`)
+/** HTTP status of a WebSocket upgrade with this token (101 when it opens). */
+function upgradeStatus(presented: string): Promise<number> {
+  return new Promise<number>((resolve) => {
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${server.port}/trpc?token=${encodeURIComponent(presented)}`,
+    )
     socket.on("unexpected-response", (_request, response) => resolve(response.statusCode ?? 0))
-    socket.on("open", () => resolve(101))
+    socket.on("open", () => {
+      socket.close()
+      resolve(101)
+    })
   })
-  expect(status).toBe(401)
+}
+
+test("a WebSocket upgrade with a wrong token is refused before any call", async () => {
+  expect(await upgradeStatus("wrong")).toBe(401)
 })
 
 test("plain HTTP requests need the token header", async () => {
@@ -152,6 +183,314 @@ test("a credential move interrupted halfway finishes on the next start, every ke
     "key-a",
     "key-b",
   ])
+})
+
+test("server results and events match the client API over the plain JSON socket", async () => {
+  const { client, close } = connect(token)
+  const expectWire = <T>(schema: z.ZodType<T>, value: unknown) =>
+    expect(schema.parse(value)).toEqual(value)
+  expectWire(serverHelloSchema, await client.server.hello.query())
+  expectWire(appSettingsSchema, await client.server.appSettings.query())
+  expectWire(backgroundTraySnapshotSchema, await client.server.traySnapshot.query())
+  expectWire(quitWorkSchema, await client.server.quitWork.query())
+  expectWire(notebookCountSchema, await client.server.notebookCount.query())
+  expectWire(secretProtectionSchema, await client.server.secretProtection.query())
+  expectWire(z.array(legacyCredentialSchema), await client.server.legacyCredentials.query())
+  expectWire(z.boolean(), await client.server.hasProject.query({ id: "missing" }))
+  expectWire(projectFileRouteSchema, await client.server.projectForFile.query({ path: dataDir }))
+
+  const events: unknown[] = []
+  const tray = client.server.onTray.subscribe(undefined, { onData: (event) => events.push(event) })
+  const settings = await new Promise<unknown>((resolve) => {
+    const subscription = client.server.onAppSettings.subscribe(undefined, {
+      onData: (event) => {
+        subscription.unsubscribe()
+        resolve(event)
+      },
+    })
+  })
+  expectWire(appSettingsSchema, settings)
+
+  const notification = new Promise<unknown>((resolve) => {
+    const subscription = client.server.onNotification.subscribe(undefined, {
+      onStarted: () =>
+        runtime.notifications.notify({
+          eventType: "workflowCompletion",
+          title: "Done",
+          body: "The workflow finished",
+          target: { type: "workflow", workflowId: "w", runId: "r" },
+        }),
+      onData: (event) => {
+        subscription.unsubscribe()
+        resolve(event)
+      },
+    })
+  })
+  expectWire(notificationStreamMessageSchema, await notification)
+  expectWire(z.array(notificationEventSchema), await client.server.notificationHistory.query())
+  tray.unsubscribe()
+  for (const event of events) expectWire(backgroundTraySnapshotSchema, event)
+  close()
+})
+
+test("an error reaches the client with its code and message and no stack trace", async () => {
+  const { client, close } = connect(token)
+  const error = await client.projects.get.query({ id: "missing-project" }).catch((e) => e)
+  expect(error).toBeInstanceOf(TRPCClientError)
+  expect(error.message).toBe("No project missing-project")
+  expect(error.data.code).toBe("NOT_FOUND")
+  expect(error.data.stack).toBeUndefined()
+  close()
+})
+
+test("a revoked device token is refused, and its open connection closes at once", async () => {
+  const local = connect(token)
+  const created = await local.client.server.devices.create.mutate({ name: "Laptop" })
+  expect(created.token.length).toBeGreaterThanOrEqual(32)
+  expect(created.device).toMatchObject({ name: "Laptop", local: false, revokedAt: null })
+
+  // Only a hash is stored, in an owner-only file.
+  const stored = readFileSync(join(dataDir, DEVICES_FILE), "utf8")
+  expect(stored).not.toContain(created.token)
+  expect(statSync(join(dataDir, DEVICES_FILE)).mode & 0o777).toBe(0o600)
+
+  const listed = await local.client.server.devices.list.query()
+  expect(listed.map((device) => [device.name, device.local])).toEqual([
+    ["This Mac", true],
+    ["Laptop", false],
+  ])
+  expect(JSON.stringify(listed)).not.toContain(created.token)
+
+  // The new device connects over the socket and over plain HTTP.
+  const laptopSocket = new WebSocket(
+    `ws://127.0.0.1:${server.port}/trpc?token=${encodeURIComponent(created.token)}`,
+  )
+  await new Promise((resolve, reject) => {
+    laptopSocket.once("open", resolve)
+    laptopSocket.once("error", reject)
+  })
+  const health = `http://127.0.0.1:${server.port}/health`
+  expect((await fetch(health, { headers: { [TOKEN_HEADER]: created.token } })).status).toBe(200)
+
+  // Revoking closes its open connection at once; later upgrades and requests get 401.
+  const closed = new Promise<number>((resolve) => laptopSocket.once("close", resolve))
+  await local.client.server.devices.revoke.mutate({ id: created.device.id })
+  await closed
+  expect(await upgradeStatus(created.token)).toBe(401)
+  expect((await fetch(health, { headers: { [TOKEN_HEADER]: created.token } })).status).toBe(401)
+  const revoked = (await local.client.server.devices.list.query()).find(
+    (device) => device.id === created.device.id,
+  )
+  expect(revoked?.revokedAt).toEqual(expect.any(Number))
+
+  // The local device token cannot be revoked, and still works.
+  const localDevice = listed.find((device) => device.local)
+  if (!localDevice) throw new Error("missing local device")
+  await expect(local.client.server.devices.revoke.mutate({ id: localDevice.id })).rejects.toThrow(
+    "The local device cannot be revoked",
+  )
+  expect(await upgradeStatus(token)).toBe(101)
+  local.close()
+})
+
+test("only the local device may create or revoke devices and stop the server", async () => {
+  const local = connect(token)
+  const created = await local.client.server.devices.create.mutate({ name: "Phone" })
+  const phone = connect(created.token)
+  const forbidden = async (call: Promise<unknown>) => {
+    const error = await call.then(
+      () => null,
+      (reason: unknown) => reason,
+    )
+    expect(error).toBeInstanceOf(TRPCClientError)
+    expect((error as TRPCClientError<ServerRouter>).data?.code).toBe("FORBIDDEN")
+  }
+  await forbidden(phone.client.server.devices.create.mutate({ name: "Another" }))
+  await forbidden(phone.client.server.devices.revoke.mutate({ id: created.device.id }))
+  await forbidden(phone.client.server.stop.mutate({ stopAgents: false }))
+  // Listing stays open to every device; nothing was added.
+  expect(
+    (await phone.client.server.devices.list.query()).map((device) => device.name),
+  ).not.toContain("Another")
+  phone.close()
+  await local.client.server.devices.revoke.mutate({ id: created.device.id })
+  local.close()
+})
+
+test("calls from a revoked device's open socket stop at once", async () => {
+  const local = connect(token)
+  const created = await local.client.server.devices.create.mutate({ name: "Tablet" })
+  const tablet = new WebSocket(
+    `ws://127.0.0.1:${server.port}/trpc?token=${encodeURIComponent(created.token)}`,
+  )
+  await new Promise((resolve, reject) => {
+    tablet.once("open", resolve)
+    tablet.once("error", reject)
+  })
+  tablet.on("error", () => {})
+  // The tablet does not read, so it never sees the server close: it keeps sending.
+  ;(tablet as unknown as { _socket: import("node:net").Socket })._socket.pause()
+  await local.client.server.devices.revoke.mutate({ id: created.device.id })
+  tablet.send(
+    JSON.stringify({
+      id: 1,
+      method: "mutation",
+      params: { path: "server.rememberQuitChoice", input: { choice: "background" } },
+    }),
+  )
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect((await local.client.server.appSettings.query()).quitChoice).toBe("ask")
+  tablet.terminate()
+  local.close()
+})
+
+test("a broken devices.json entry or a failing token check never crashes the server", async () => {
+  const { DeviceRegistry } = await import("./devices")
+  const dir = mkdtempSync(join(tmpdir(), "pi-lab-devices-test-"))
+  const { writeOwnerOnly } = await import("./access")
+  writeOwnerOnly(
+    join(dir, DEVICES_FILE),
+    JSON.stringify([{ id: "short", name: "Old", createdAt: 1, revokedAt: null, tokenHash: "ab" }]),
+  )
+  const registry = new DeviceRegistry(dir)
+  expect(registry.authenticate("some-token")).toBeNull()
+  rmSync(dir, { recursive: true, force: true })
+
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+  const broken = await listen({
+    port: 0,
+    access: {
+      authenticate: () => {
+        throw new Error("token check failed")
+      },
+      track: () => () => {},
+    },
+    localToken: token,
+    testRoutes: false,
+    createContext: () => runtime.createAppContext(),
+    handleScheme: async () => new Response(null, { status: 404 }),
+  })
+  const status = await new Promise<number>((resolve) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${broken.port}/trpc?token=x`)
+    socket.on("unexpected-response", (_request, response) => resolve(response.statusCode ?? 0))
+    socket.on("error", () => resolve(-1))
+  })
+  expect(status).toBe(500)
+  expect(errors).toHaveBeenCalled()
+  errors.mockRestore()
+  await broken.close()
+})
+
+test("an answer whose write fails leaves the request pending and returns the error", async () => {
+  const { client, close } = connect(token)
+  const outcome = runtime.notifications.notify({
+    eventType: "agentInput",
+    title: "Agent needs input",
+    body: "Continue?",
+    target: {
+      type: "agent",
+      projectId: "project",
+      workspaceId: "workspace",
+      sessionId: "no-such-session",
+      agentId: "test-agent",
+      origin: "project",
+    },
+  })
+  const pendingIds = async (): Promise<string[]> => {
+    const ids: string[] = []
+    await new Promise<void>((resolve) => {
+      const subscription = client.server.onNotification.subscribe(undefined, {
+        onData: (message) => {
+          if (message.type === "alert") ids.push(message.event.id)
+        },
+        onStarted: () =>
+          setTimeout(() => {
+            subscription.unsubscribe()
+            resolve()
+          }, 100),
+      })
+    })
+    return ids
+  }
+  const [requestId] = await pendingIds()
+  if (!requestId) throw new Error(`no pending request (${JSON.stringify(outcome)})`)
+  await expect(
+    client.server.answerRequest.mutate({ requestId, text: "yes" }),
+  ).rejects.toBeInstanceOf(TRPCClientError)
+  expect(await pendingIds()).toContain(requestId)
+  runtime.notifications.take(requestId)
+  close()
+})
+
+test("two devices answer the same request: the first is accepted, the other's text never reaches the agent", async () => {
+  // A real PTY in the real daemon: the agent prints a prompt and writes every line it reads to a file.
+  const received = join(dataDir, "answers.txt")
+  const daemon = await runtime.createAppContext().getDaemonClient()
+  const session = await daemon.spawn({
+    command: process.execPath,
+    args: [
+      "-e",
+      `process.stdout.write("Allow this command? [y/N] ");process.stdin.on("data",(d)=>require("node:fs").appendFileSync(${JSON.stringify(received)},d))`,
+    ],
+    env: { ...(process.env as Record<string, string>), ELECTRON_RUN_AS_NODE: "1" },
+  })
+
+  const first = connect(token)
+  const second = connect(token)
+  /** Collect one client's notification stream. */
+  const stream = (client: typeof first.client) => {
+    const messages: Array<{ type: string; id?: string; event?: { id: string } }> = []
+    const started = new Promise<void>((resolve) => {
+      client.server.onNotification.subscribe(undefined, {
+        onStarted: () => resolve(),
+        onData: (message) => messages.push(message),
+      })
+    })
+    return { messages, started }
+  }
+  const firstStream = stream(first.client)
+  const secondStream = stream(second.client)
+  await Promise.all([firstStream.started, secondStream.started])
+
+  // The pending request, as the activity monitor raises it when the agent waits.
+  runtime.notifications.notify({
+    eventType: "agentInput",
+    title: "Agent needs input",
+    body: "Allow this command?",
+    target: {
+      type: "agent",
+      projectId: "project",
+      workspaceId: "workspace",
+      sessionId: session.id,
+      agentId: "test-agent",
+      origin: "project",
+    },
+  })
+  await vi.waitFor(() => expect(secondStream.messages).toHaveLength(1))
+  const requestId = secondStream.messages[0]?.event?.id
+  if (!requestId) throw new Error("no pending request")
+
+  const answers = await Promise.all([
+    first.client.server.answerRequest.mutate({ requestId, text: "yes from laptop" }),
+    second.client.server.answerRequest.mutate({ requestId, text: "no from phone" }),
+  ])
+  expect(answers).toEqual([{ status: "accepted" }, { status: "already-answered" }])
+
+  // The request clears on every device.
+  for (const { messages } of [firstStream, secondStream]) {
+    await vi.waitFor(() => expect(messages).toContainEqual({ type: "cleared", id: requestId }))
+  }
+  await vi.waitFor(() => expect(readFileSync(received, "utf8")).toContain("yes from laptop"))
+  // Let any stray write land before checking it never came.
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  expect(readFileSync(received, "utf8")).not.toContain("no from phone")
+  expect(await second.client.server.answerRequest.mutate({ requestId, text: "late" })).toEqual({
+    status: "already-answered",
+  })
+
+  await daemon.kill(session.id)
+  first.close()
+  second.close()
 })
 
 test("GET /identity proves the server holds the token without sending it, new for each nonce", async () => {

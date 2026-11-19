@@ -9,6 +9,7 @@ import {
   useSciencePanelWidth,
   useTasksProject,
 } from "../../../../../preferences/preferences"
+import { withLaunchId } from "../../../../../trpc/launch"
 import { useTRPC } from "../../../../../trpc/react"
 import { useReportViewProject } from "../../../components/StatusBar/viewProjectStore"
 import { setPendingTaskSession } from "../../../projects/-pendingTaskSession"
@@ -84,7 +85,7 @@ export function ScienceTasks({
   const updateTask = useMutation(trpc.science.tasks.update.mutationOptions(mutationOptions))
   const deleteTask = useMutation(trpc.science.tasks.delete.mutationOptions(mutationOptions))
   const moveTask = useMutation(trpc.science.tasks.move.mutationOptions(mutationOptions))
-  const startSession = useMutation(trpc.sessions.start.mutationOptions())
+  const startSession = useMutation(withLaunchId(trpc.sessions.start.mutationOptions()))
   // A skill session a top bar button started, until the session panel opens it.
   const [sessionRequest, setSessionRequest] = useState<ScienceSessionRequest | null>(null)
   const clearSessionRequest = useCallback(() => setSessionRequest(null), [])

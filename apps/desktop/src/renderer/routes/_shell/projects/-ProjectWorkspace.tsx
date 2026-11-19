@@ -30,6 +30,7 @@ import {
 } from "../../../preferences/preferences"
 import { stripOuterQuery } from "../../../QuickEditor/routeTarget"
 import { useDisplayPath } from "../../../trpc/displayPath"
+import { withLaunchId } from "../../../trpc/launch"
 import { useTRPC, useTRPCClient } from "../../../trpc/react"
 import { useOptionalNewFileController } from "../components/NewFileController"
 import { useReportViewProject } from "../components/StatusBar/viewProjectStore"
@@ -275,7 +276,9 @@ export function ProjectWorkspace({
 
   // Auto-research: open an isolated worktree agent session for the project and
   // attach it so it appears (and is selectable) in the central panel.
-  const startAutoResearch = useMutation(trpc.sessions.startAutoResearch.mutationOptions())
+  const startAutoResearch = useMutation(
+    withLaunchId(trpc.sessions.startAutoResearch.mutationOptions()),
+  )
   // Auto-research needs a skill linked in Settings; without one it shows a popup instead.
   const autoResearchLink = useSkillLink("auto-research")
   const onAutoResearch = () => {

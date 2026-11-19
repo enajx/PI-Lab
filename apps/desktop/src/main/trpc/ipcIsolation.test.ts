@@ -3,7 +3,6 @@ import type { Operation } from "@trpc/client"
 import { initTRPC, TRPCError } from "@trpc/server"
 import { observable } from "@trpc/server/observable"
 import type { TRPCResponseMessage } from "@trpc/server/rpc"
-import superjson from "superjson"
 import { afterEach, expect, test, vi } from "vitest"
 import { z } from "zod"
 import { createDocumentTrpcBridge } from "../../preload/trpcBridge"
@@ -55,7 +54,7 @@ afterEach(() => {
 
 /** A real installed IPC handler/router with only Electron's transport events substituted. */
 function harness() {
-  const t = initTRPC.create({ transformer: superjson })
+  const t = initTRPC.create()
   const gates = new Map<string, Promise<void>>()
   const stopped = vi.fn()
   const router = t.router({
@@ -196,7 +195,7 @@ test("a delayed reply from a previous document cannot satisfy a new request with
     id: 1,
     type: "query",
     path: "health.ping",
-    input: superjson.serialize({ message }),
+    input: { message },
     context: {},
     signal: null,
   })
@@ -216,7 +215,5 @@ test("a delayed reply from a previous document cannot satisfy a new request with
   const response = received[0]
   if (!response || !("result" in response) || !("data" in response.result))
     throw new Error("Expected the new document's successful query response")
-  expect(
-    superjson.deserialize(response.result.data as Parameters<typeof superjson.deserialize>[0]),
-  ).toEqual({ ok: true, echo: "new", at: 123 })
+  expect(response.result.data).toEqual({ ok: true, echo: "new", at: 123 })
 })

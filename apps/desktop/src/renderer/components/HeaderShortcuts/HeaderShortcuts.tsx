@@ -6,6 +6,7 @@ import { Check, ChevronDown, ChevronRight, FlaskConical, Plus, Waypoints } from 
 import { Fragment, type ReactNode, useRef, useState } from "react"
 import { useTranslate } from "../../i18n/language"
 import { type HeaderShortcutsView, useHeaderShortcuts } from "../../preferences/preferences"
+import { withLaunchId } from "../../trpc/launch"
 import { useTRPC } from "../../trpc/react"
 import { usePopupDismiss } from "../usePopupDismiss"
 
@@ -113,7 +114,7 @@ export function HeaderShortcuts({
     ...trpc.automations.list.queryOptions(),
     enabled: open || hasRoutine,
   })
-  const startSkill = useMutation(trpc.sessions.startSkill.mutationOptions())
+  const startSkill = useMutation(withLaunchId(trpc.sessions.startSkill.mutationOptions()))
   const runRoutine = useMutation(trpc.automations.runNow.mutationOptions())
 
   // The same skill can sit in several folders; the project's copy is listed first.

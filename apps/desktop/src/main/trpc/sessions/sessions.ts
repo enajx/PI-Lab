@@ -17,6 +17,11 @@ import { observable } from "@trpc/server/observable"
 import { and, eq } from "drizzle-orm"
 import { z } from "zod"
 import type { LiveAgentStatus } from "../../../shared/agentStatus"
+import {
+  liveAgentStatusSchema,
+  projectAgentRowSchema,
+  startSessionResultSchema,
+} from "../../../shared/clientApi"
 import type { ProjectAgentRow } from "../../../shared/projectAgents"
 import { readProjectAgentConfig } from "../../agents/projectConfig"
 import { isGitRepo } from "../../git"
@@ -29,6 +34,7 @@ import { publicProcedure, router } from "../trpc"
 import { findSkill, notLinkedMessage } from "../workflows/planResearchSkill"
 import { runningProjectWorkflowTasks } from "../workflows/running"
 import { createWorkspace, workspaceWorkingDir } from "../workspaces"
+import { launches, launchIdSchema } from "./launchIds"
 
 /**
  * Sessions router — the "start agent session" flow.
@@ -49,6 +55,9 @@ import { createWorkspace, workspaceWorkingDir } from "../workspaces"
 /** The views an agent can be started from. */
 const originSchema = z.enum(["project", "latex", "analysis", "tasks", "routine"])
 
+/** One `onStatus` event: every live agent. */
+const liveAgentStatusesSchema = z.array(liveAgentStatusSchema)
+
 const startInput = z.object({
   projectId: z.string().min(1),
   agentId: z.string().min(1),
@@ -66,6 +75,14 @@ const startInput = z.object({
   /** Cols/rows for the PTY the agent runs in. */
   cols: z.number().int().positive().default(80),
   rows: z.number().int().positive().default(24),
+  /** Client-made ID of this start; a retry with the same ID returns the first result. */
+  launchId: launchIdSchema.optional(),
+})
+
+/** Project-level start buttons: the project and the launch ID (see {@link launches}). */
+const projectStartInput = z.object({
+  projectId: z.string().min(1),
+  launchId: launchIdSchema.optional(),
 })
 
 /** Which kind of workspace an agent session was opened in. */
@@ -586,11 +603,14 @@ export const sessionsRouter = router({
   /** The rows of a project's "Project Agents" box (see {@link listProjectAgents}). */
   projectAgents: publicProcedure
     .input(z.object({ projectId: z.string().min(1) }))
+    .output(z.array(projectAgentRowSchema))
     .query(({ ctx, input }): ProjectAgentRow[] => listProjectAgents(ctx, input.projectId)),
   /** One compact stream shared by shell indicators and the title bar. */
   onStatus: publicProcedure.subscription(({ ctx }) =>
     observable<LiveAgentStatus[]>((emit) =>
-      ctx.activityStatus.subscribe((sessions) => emit.next(sessions)),
+      ctx.activityStatus.subscribe((sessions) =>
+        emit.next(liveAgentStatusesSchema.parse(sessions)),
+      ),
     ),
   ),
   /**
@@ -600,7 +620,11 @@ export const sessionsRouter = router({
    */
   start: publicProcedure
     .input(startInput)
-    .mutation(({ ctx, input }): Promise<StartSessionResult> => startAgentSession(ctx, input)),
+    .output(startSessionResultSchema)
+    .mutation(
+      ({ ctx, input }): Promise<StartSessionResult> =>
+        launches.run("sessions.start", input.launchId, () => startAgentSession(ctx, input)),
+    ),
 
   /**
    * Placeholder "Auto-research" trigger for a Dashboard project card. Opens an
@@ -609,8 +633,13 @@ export const sessionsRouter = router({
    * wrapper over {@link startAutoResearch}.
    */
   startAutoResearch: publicProcedure
-    .input(z.object({ projectId: z.string().min(1) }))
-    .mutation(({ ctx, input }): Promise<StartAutoResearchResult> => startAutoResearch(ctx, input)),
+    .input(projectStartInput)
+    .mutation(
+      ({ ctx, input }): Promise<StartAutoResearchResult> =>
+        launches.run("sessions.startAutoResearch", input.launchId, () =>
+          startAutoResearch(ctx, input),
+        ),
+    ),
 
   /** Start the project's agent with one of its skills triggered (see {@link startSkill}). */
   startSkill: publicProcedure
@@ -619,20 +648,29 @@ export const sessionsRouter = router({
         projectId: z.string().min(1),
         skillSlug: z.string().min(1),
         origin: originSchema,
+        launchId: launchIdSchema.optional(),
       }),
     )
-    .mutation(({ ctx, input }): Promise<StartSkillResult> => startSkill(ctx, input)),
+    .mutation(
+      ({ ctx, input }): Promise<StartSkillResult> =>
+        launches.run("sessions.startSkill", input.launchId, () => startSkill(ctx, input)),
+    ),
 
   /** The Analysis view's Analyze experiments button (see {@link startAnalyzeExperiments}). */
   startAnalyzeExperiments: publicProcedure
-    .input(z.object({ projectId: z.string().min(1) }))
+    .input(projectStartInput)
     .mutation(
       ({ ctx, input }): Promise<StartAnalyzeExperimentsResult> =>
-        startAnalyzeExperiments(ctx, input),
+        launches.run("sessions.startAnalyzeExperiments", input.launchId, () =>
+          startAnalyzeExperiments(ctx, input),
+        ),
     ),
 
   /** The Analysis view's Report button (see {@link startReport}). */
   startReport: publicProcedure
-    .input(z.object({ projectId: z.string().min(1) }))
-    .mutation(({ ctx, input }): Promise<StartReportResult> => startReport(ctx, input)),
+    .input(projectStartInput)
+    .mutation(
+      ({ ctx, input }): Promise<StartReportResult> =>
+        launches.run("sessions.startReport", input.launchId, () => startReport(ctx, input)),
+    ),
 })

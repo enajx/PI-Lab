@@ -10,13 +10,19 @@ import {
   type DaemonReply,
   encodeFrame,
   FrameDecoder,
+  PROTOCOL_VERSION,
   parseClientRequest,
 } from "./protocol"
 import { type SessionHandle, SessionStore, type SessionStoreOptions } from "./session"
 
-// Larger than the most-escaped scrollback replay, while bounding stalled readers.
+// Bounds stalled readers of live output; attach replies use the replay limit.
+// A connection over it is dropped (logged, with a `closing` frame giving the
+// reason); the server reconnects and resumes each terminal from its offset.
 const MAX_PENDING_OUTPUT_BYTES = 4 * 1024 * 1024
 const MAX_PROCESS_REPLAY_BYTES = 16 * 1024 * 1024
+// A dropped connection whose reader takes longer than this to take what is
+// queued is destroyed, so a reader that stopped for good cannot hold the queue.
+const DROPPED_FLUSH_MS = 10_000
 
 export interface DaemonServerOptions {
   /** Absolute path of the Unix socket to listen on. */
@@ -31,6 +37,8 @@ class Connection {
   private readonly decoder = new FrameDecoder()
   /** sessionId -> unsubscribe fn for every session this connection is attached to. */
   private readonly subscriptions = new Map<string, () => void>()
+  /** Set once the connection is dropped: nothing more is sent on it. */
+  private dropped = false
 
   constructor(
     readonly socket: Socket,
@@ -44,10 +52,10 @@ class Connection {
     let decoded: unknown[]
     try {
       decoded = this.decoder.push(raw)
-    } catch {
+    } catch (error) {
       // A line that is not valid JSON is unrecoverable for the stream position,
       // so close the connection rather than risk desyncing the framing.
-      this.socket.destroy()
+      this.drop(`a request line was not valid JSON (${errorMessage(error)})`)
       return
     }
     for (const value of decoded) {
@@ -57,9 +65,10 @@ class Connection {
   }
 
   send(frame: DaemonFrame): void {
-    if (this.socket.destroyed) return
+    if (this.socket.destroyed || this.dropped) return
     const encoded = encodeFrame(frame)
     const limit =
+      frame.kind === "attach-ok" ||
       frame.kind === "process-attach-ok" ||
       frame.kind === "process-start-ok" ||
       frame.kind === "process-exit"
@@ -67,17 +76,61 @@ class Connection {
         : MAX_PENDING_OUTPUT_BYTES
     if (this.socket.writableLength + Buffer.byteLength(encoded) > limit) {
       // The session keeps running and its bounded replay remains available on reattach.
-      this.socket.destroy()
+      this.drop(
+        `pending output over ${limit} bytes (${this.socket.writableLength} queued, the reader is too slow)`,
+      )
       return
     }
     this.socket.write(encoded)
   }
 
+  /**
+   * Stop sending on this connection, log why, and close it after what is
+   * already queued, ending with a `closing` frame that tells the client why.
+   */
+  private drop(reason: string): void {
+    if (this.dropped) return
+    this.dropped = true
+    console.warn(`[pty-daemon] dropped a client connection: ${reason}`)
+    this.dispose()
+    this.socket.end(encodeFrame({ kind: "closing", reason }))
+    const socket = this.socket
+    setTimeout(() => {
+      if (socket.destroyed) return
+      console.warn(
+        `[pty-daemon] destroyed a dropped client connection: its reader did not take the queued output within ${DROPPED_FLUSH_MS}ms`,
+      )
+      socket.destroy()
+    }, DROPPED_FLUSH_MS).unref()
+  }
+
   attach(session: SessionHandle): void {
     // Renew an existing attachment so a repeated attach also sees a cached exit.
     this.detach(session.id)
+    const sessionId = session.id
+    const generation = session.generation
     const unsubscribe = session.subscribe({
-      onData: (chunk) => this.send({ kind: "data", sessionId: session.id, chunk }),
+      onData: (bytes, offset) =>
+        this.send({
+          kind: "data",
+          sessionId,
+          generation,
+          offset,
+          base64: bytes.toString("base64"),
+        }),
+      onResize: (cols, rows, revision, offset) =>
+        this.send({ kind: "resize", sessionId, generation, offset, revision, cols, rows }),
+      onEcho: (input, offset) => this.send({ kind: "echo", sessionId, generation, offset, input }),
+      onEchoAck: (key, offset, input) =>
+        this.send({
+          kind: "echo-ack",
+          sessionId,
+          generation,
+          clientId: key.clientId,
+          seq: key.seq,
+          offset,
+          input,
+        }),
       onExit: (exitCode, signal) =>
         this.send({ kind: "exit", sessionId: session.id, exitCode, signal }),
     })
@@ -153,7 +206,10 @@ export class DaemonServer {
       this.connections.delete(connection)
     }
     socket.on("close", cleanup)
-    socket.on("error", cleanup)
+    socket.on("error", (error) => {
+      console.warn(`[pty-daemon] client connection error: ${errorMessage(error)}`)
+      cleanup()
+    })
   }
 
   private route(request: ClientRequest, connection: Connection): void {
@@ -267,9 +323,14 @@ export class DaemonServer {
       return
     }
     // The spawning connection is attached implicitly so it begins streaming
-    // output without a separate round-trip. Scrollback is empty at spawn time.
+    // output from offset 0 without a separate round-trip.
     connection.attach(session)
-    this.reply(connection, { kind: "spawn-ok", cid: request.cid, session: session.info() })
+    this.reply(connection, {
+      kind: "spawn-ok",
+      cid: request.cid,
+      session: session.info(),
+      generation: session.generation,
+    })
   }
 
   private handleAttach(
@@ -281,11 +342,33 @@ export class DaemonServer {
       this.fail(connection, request.cid, "unknown-session", `no session ${request.sessionId}`)
       return
     }
-    // Snapshot scrollback before subscribing so the replay and the live stream
-    // do not overlap or drop a chunk that arrives between the two steps.
-    const scrollback = session.getScrollback()
+    // The start and the subscription happen in one synchronous step, so live
+    // events continue at the start's end offset with no gap or overlap.
+    const start = session.startFrom(request.resume, request.preferReplay === true)
     const info = session.info()
-    this.reply(connection, { kind: "attach-ok", cid: request.cid, session: info, scrollback })
+    const base64 = start.bytes.toString("base64")
+    this.reply(connection, {
+      kind: "attach-ok",
+      cid: request.cid,
+      session: info,
+      generation: session.generation,
+      revision: session.screenRevision,
+      input: session.echo,
+      cols: info.cols,
+      rows: info.rows,
+      start:
+        start.mode === "replay"
+          ? { mode: "replay", offset: start.offset, base64 }
+          : start.mode === "snapshot"
+            ? { mode: "snapshot", offset: start.offset, screen: start.screen, base64 }
+            : {
+                mode: "refresh",
+                base: start.base,
+                offset: start.offset,
+                screen: start.screen,
+                base64,
+              },
+    })
     connection.attach(session)
   }
 
@@ -306,7 +389,18 @@ export class DaemonServer {
       this.fail(connection, request.cid, "unknown-session", `no session ${request.sessionId}`)
       return
     }
-    session.write(request.data)
+    if (request.key !== undefined) {
+      const status = session.writeKey(request.data, request.key)
+      this.reply(connection, {
+        kind: "write-ok",
+        cid: request.cid,
+        sessionId: request.sessionId,
+        status,
+      })
+      return
+    }
+    if (request.message === true) session.writeMessage(request.data)
+    else session.write(request.data, null)
     this.reply(connection, { kind: "write-ok", cid: request.cid, sessionId: request.sessionId })
   }
 
@@ -346,7 +440,12 @@ export class DaemonServer {
     request: Extract<ClientRequest, { kind: "list" }>,
     connection: Connection,
   ): void {
-    this.reply(connection, { kind: "list-ok", cid: request.cid, sessions: this.store.list() })
+    this.reply(connection, {
+      kind: "list-ok",
+      cid: request.cid,
+      sessions: this.store.list(),
+      protocol: PROTOCOL_VERSION,
+    })
   }
 
   /** Confirm first, then close once the reply is flushed, since closing destroys the socket. */

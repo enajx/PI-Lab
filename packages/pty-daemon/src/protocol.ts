@@ -2,7 +2,7 @@
 // unsolicited events have none.
 
 /** Bump when a backward-incompatible change is made to the frame shapes. */
-export const PROTOCOL_VERSION = 1
+export const PROTOCOL_VERSION = 3
 
 export interface SessionInfo {
   /** Daemon-assigned opaque identifier, stable for the session's lifetime. */
@@ -87,11 +87,31 @@ export interface SpawnRequest {
   rows?: number
 }
 
-/** Begin receiving live `data`/`exit` events for a session; replays scrollback first. */
+/**
+ * Identity of a client's screen state: the daemon generation, the next byte its
+ * emulator needs (raw PTY bytes since spawn), and the screen revision.
+ */
+export interface ResumePoint {
+  generation: string
+  offset: number
+  revision: number
+}
+
+/**
+ * Begin receiving live `data`/`resize`/`exit` events for a session. With a
+ * resume point the daemon replays the bytes from it when it can; otherwise,
+ * and on a fresh attach (`resume: null`), it sends a screen snapshot.
+ */
 export interface AttachRequest {
   kind: "attach"
   cid: string
   sessionId: string
+  resume: ResumePoint | null
+  /**
+   * A terminal shown again (user decision): replay whenever the tail still
+   * has the bytes, whatever their size, so its scrollback stays exact.
+   */
+  preferReplay?: true
 }
 
 /** Stop receiving events for a session on this connection (the session keeps running). */
@@ -101,12 +121,54 @@ export interface DetachRequest {
   sessionId: string
 }
 
+/**
+ * The PTY's ECHO and ICANON termios bits. ECHO off with ICANON on is a hidden
+ * prompt (read -s, getpass, sudo); a shell's line editor and full-screen apps
+ * turn both off and echo keys themselves.
+ */
+export interface InputFlags {
+  echo: boolean
+  icanon: boolean
+}
+
+/** A key a user typed: who typed it and its number in that client's sequence. */
+export interface KeyInput {
+  clientId: string
+  seq: number
+  /**
+   * The client's consumed point when the key was typed (generation and the
+   * next byte its emulator needed), or null before its first start.
+   */
+  typedAt: { generation: string; offset: number } | null
+  /**
+   * True for the first send on the connection the key was typed on. False for
+   * a resend after a lost reply and for a key typed while disconnected: the
+   * daemon applies those only if no new output appeared since `typedAt`.
+   */
+  firstSend: boolean
+}
+
+/**
+ * What the daemon did with a typed key: written; already written before (a
+ * resend after a lost reply), so not written again; or not written because
+ * output appeared since it was typed (the screen the user saw changed).
+ */
+export type KeyStatus = "applied" | "duplicate" | "dropped"
+
 export interface WriteRequest {
   kind: "write"
   cid: string
   sessionId: string
   /** Bytes to feed to the PTY's stdin, as a UTF-8 string. */
   data: string
+  /** Set for typed keys: the daemon sends an {@link EchoAckEvent} for each one. */
+  key?: KeyInput
+  /**
+   * A message from the compose line: the daemon writes `data` and Enter
+   * (`\r`), wrapped in bracketed paste (`ESC[200~ ... ESC[201~`) when the
+   * program turned that mode on, so a newline inside it does not submit early.
+   */
+  message?: true
 }
 
 export interface ResizeRequest {
@@ -155,14 +217,40 @@ export interface SpawnReply {
   kind: "spawn-ok"
   cid: string
   session: SessionInfo
+  /** Daemon generation; the spawning connection is attached at offset 0, revision 0. */
+  generation: string
 }
+
+/**
+ * How an attach starts, on the wire. Raw bytes travel as base64.
+ * - replay: the bytes from the requested offset to the current offset.
+ * - snapshot: a screen that contains exactly the bytes before `offset`, to be
+ *   written into a reset terminal of the reply's size, then the bytes from
+ *   `offset` to the current offset.
+ * - refresh: only for a client at `base` (its resume point): resize to the
+ *   reply's size if it differs, write `screen` (it resets the modes and
+ *   replaces the visible rows, keeping the client's history), then the bytes
+ *   from `offset` to the current offset.
+ * Live `data` events continue from the current offset with no gap or overlap.
+ */
+export type AttachStartFrame =
+  | { mode: "replay"; offset: number; base64: string }
+  | { mode: "snapshot"; offset: number; screen: string; base64: string }
+  | { mode: "refresh"; base: ResumePoint; offset: number; screen: string; base64: string }
 
 export interface AttachReply {
   kind: "attach-ok"
   cid: string
   session: SessionInfo
-  /** Buffered scrollback replayed at attach time, as a single UTF-8 string. */
-  scrollback: string
+  generation: string
+  /** Screen revision after the start is applied. */
+  revision: number
+  /** The PTY's ECHO and ICANON flags after the start (see {@link EchoEvent}). */
+  input: InputFlags
+  /** Current PTY size. */
+  cols: number
+  rows: number
+  start: AttachStartFrame
 }
 
 export interface DetachReply {
@@ -175,6 +263,8 @@ export interface WriteReply {
   kind: "write-ok"
   cid: string
   sessionId: string
+  /** For a typed key (`key` set); absent for other writes. */
+  status?: KeyStatus
 }
 
 export interface ResizeReply {
@@ -195,6 +285,8 @@ export interface ListReply {
   kind: "list-ok"
   cid: string
   sessions: SessionInfo[]
+  /** Protocol version the daemon speaks. Absent in replies from version 1 daemons. */
+  protocol: number
 }
 
 /** Sent before the daemon stops its sessions and closes. */
@@ -230,12 +322,73 @@ export type DaemonReply =
 // Events: daemon -> client, unsolicited (sent to every attached connection).
 // ---------------------------------------------------------------------------
 
+/** A chunk of raw PTY output, on the wire. */
+export interface DataFrame {
+  kind: "data"
+  sessionId: string
+  generation: string
+  /** Offset of the chunk's first byte (raw PTY bytes since spawn). */
+  offset: number
+  /** The raw bytes, base64 encoded. */
+  base64: string
+}
+
+/** A chunk of raw PTY output, as the client delivers it. */
 export interface DataEvent {
   kind: "data"
   sessionId: string
-  /** A chunk of PTY output, as a UTF-8 string. */
-  chunk: string
+  generation: string
+  /** Offset of the chunk's first byte (raw PTY bytes since spawn). */
+  offset: number
+  bytes: Buffer
 }
+
+/**
+ * The PTY was resized. The screen changed without new output, so the revision
+ * changed; it applies after every byte before `offset`.
+ */
+export interface ResizeEvent {
+  kind: "resize"
+  sessionId: string
+  generation: string
+  offset: number
+  revision: number
+  cols: number
+  rows: number
+}
+
+/**
+ * The PTY's ECHO or ICANON flag changed. It applies at `offset`: a change to
+ * hidden input (ECHO off, ICANON on) before the output read with it, any
+ * other change after it. The daemon reads the flags on every output chunk
+ * and every write.
+ */
+export interface EchoEvent {
+  kind: "echo"
+  sessionId: string
+  generation: string
+  offset: number
+  input: InputFlags
+}
+
+/**
+ * Sent {@link ECHO_ACK_DELAY_MS} after a typed key was written, with the
+ * offset at that moment, so the program's echo of the key comes before it.
+ * Local echo checks its predictions for keys up to `seq` once the bytes
+ * before `offset` are applied.
+ */
+export interface EchoAckEvent {
+  kind: "echo-ack"
+  sessionId: string
+  generation: string
+  clientId: string
+  seq: number
+  offset: number
+  input: InputFlags
+}
+
+/** How long after a typed key its echo ack is sent (Mosh's ECHO_TIMEOUT). */
+export const ECHO_ACK_DELAY_MS = 50
 
 export interface ExitEvent {
   kind: "exit"
@@ -244,7 +397,23 @@ export interface ExitEvent {
   signal: number | null
 }
 
-export type DaemonEvent = DataEvent | ExitEvent | ProcessEvent
+/**
+ * The daemon is closing this connection (for example, the reader was too slow).
+ * Sent last, after everything already queued; the sessions keep running.
+ */
+export interface ClosingEvent {
+  kind: "closing"
+  reason: string
+}
+
+export type DaemonEvent =
+  | DataFrame
+  | ResizeEvent
+  | EchoEvent
+  | EchoAckEvent
+  | ExitEvent
+  | ProcessEvent
+  | ClosingEvent
 
 /** Every frame the daemon can emit. */
 export type DaemonFrame = DaemonReply | DaemonEvent
@@ -288,6 +457,10 @@ export class FrameDecoder {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -355,15 +528,64 @@ export function parseClientRequest(value: unknown): ClientRequest | null {
         rows: value.rows,
       }
     }
-    case "attach":
+    case "attach": {
       if (typeof value.sessionId !== "string") return null
-      return { kind: "attach", cid, sessionId: value.sessionId }
+      const resume = value.resume
+      const prefer = value.preferReplay === true ? { preferReplay: true as const } : {}
+      if (resume === null || resume === undefined)
+        return { kind: "attach", cid, sessionId: value.sessionId, resume: null, ...prefer }
+      if (
+        !isRecord(resume) ||
+        typeof resume.generation !== "string" ||
+        !isCount(resume.offset) ||
+        !isCount(resume.revision)
+      )
+        return null
+      return {
+        kind: "attach",
+        cid,
+        sessionId: value.sessionId,
+        resume: { generation: resume.generation, offset: resume.offset, revision: resume.revision },
+        ...prefer,
+      }
+    }
     case "detach":
       if (typeof value.sessionId !== "string") return null
       return { kind: "detach", cid, sessionId: value.sessionId }
-    case "write":
+    case "write": {
       if (typeof value.sessionId !== "string" || typeof value.data !== "string") return null
-      return { kind: "write", cid, sessionId: value.sessionId, data: value.data }
+      if (value.message === true)
+        return { kind: "write", cid, sessionId: value.sessionId, data: value.data, message: true }
+      const key = value.key
+      if (key === undefined)
+        return { kind: "write", cid, sessionId: value.sessionId, data: value.data }
+      if (
+        !isRecord(key) ||
+        typeof key.clientId !== "string" ||
+        !isCount(key.seq) ||
+        typeof key.firstSend !== "boolean"
+      )
+        return null
+      const raw = key.typedAt
+      let typedAt: { generation: string; offset: number } | null = null
+      if (raw !== null) {
+        if (!isRecord(raw) || typeof raw.generation !== "string" || !isCount(raw.offset))
+          return null
+        typedAt = { generation: raw.generation, offset: raw.offset }
+      }
+      return {
+        kind: "write",
+        cid,
+        sessionId: value.sessionId,
+        data: value.data,
+        key: {
+          clientId: key.clientId,
+          seq: key.seq,
+          typedAt,
+          firstSend: key.firstSend,
+        },
+      }
+    }
     case "resize":
       if (typeof value.sessionId !== "string") return null
       if (typeof value.cols !== "number" || typeof value.rows !== "number") return null
@@ -390,13 +612,20 @@ export function parseDaemonFrame(value: unknown): DaemonFrame | null {
     case "process-output":
     case "process-exit":
       return typeof value.id === "string" ? (value as unknown as ProcessEvent) : null
+    case "spawn-ok":
+      // A daemon from before protocol 2 sends no generation.
+      return typeof value.cid === "string" && typeof value.generation === "string"
+        ? (value as unknown as SpawnReply)
+        : null
+    case "attach-ok":
+      return typeof value.cid === "string" && isRecord(value.start)
+        ? (value as unknown as AttachReply)
+        : null
     case "process-start-ok":
     case "process-attach-ok":
     case "process-list-ok":
     case "process-kill-ok":
     case "process-forget-ok":
-    case "spawn-ok":
-    case "attach-ok":
     case "detach-ok":
     case "write-ok":
     case "resize-ok":
@@ -406,11 +635,30 @@ export function parseDaemonFrame(value: unknown): DaemonFrame | null {
     case "error":
       return typeof value.cid === "string" ? (value as unknown as DaemonReply) : null
     case "data":
-      return typeof value.sessionId === "string" && typeof value.chunk === "string"
-        ? (value as unknown as DataEvent)
+      return typeof value.sessionId === "string" &&
+        isCount(value.offset) &&
+        typeof value.base64 === "string"
+        ? (value as unknown as DataFrame)
+        : null
+    case "resize":
+      return typeof value.sessionId === "string" && isCount(value.offset)
+        ? (value as unknown as ResizeEvent)
+        : null
+    case "echo-ack":
+      return typeof value.sessionId === "string" &&
+        typeof value.clientId === "string" &&
+        isCount(value.seq) &&
+        isCount(value.offset)
+        ? (value as unknown as EchoAckEvent)
+        : null
+    case "echo":
+      return typeof value.sessionId === "string" && isCount(value.offset) && isRecord(value.input)
+        ? (value as unknown as EchoEvent)
         : null
     case "exit":
       return typeof value.sessionId === "string" ? (value as unknown as ExitEvent) : null
+    case "closing":
+      return typeof value.reason === "string" ? (value as unknown as ClosingEvent) : null
     default:
       return null
   }

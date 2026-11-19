@@ -75,6 +75,7 @@ import type { QuitWork } from "../main/window/userQuit"
 import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
 import { caffeinateAdapter } from "./caffeinate"
 import type { ServerConfig } from "./config"
+import { DeviceRegistry } from "./devices"
 import { NotificationFeed } from "./notificationFeed"
 import {
   createSecretStore,
@@ -135,6 +136,7 @@ export class ServerRuntime {
     scheduler: systemActivityScheduler,
   })
   readonly secrets: SecretStore
+  readonly devices: DeviceRegistry
   private activityStatus: ActivityStatusFeed | null = null
   private agentLaunchReady: Promise<void> | null = null
   private activityMonitor: ActivityMonitorPort | null = null
@@ -152,6 +154,7 @@ export class ServerRuntime {
       () => getSettingsOrDefaults(getDb()).notifications,
       isTestMode && process.env.PI_LAB_TEST_NOTIFICATIONS !== "1",
     )
+    this.devices = new DeviceRegistry(config.dataDir)
     this.secrets = createSecretStore({
       dataDir: config.dataDir,
       keychain: isTestMode ? testKeychain(config.dataDir) : macKeychain,
@@ -206,6 +209,12 @@ export class ServerRuntime {
     onStep("reconciling")
     await this.ensureAgentRecovery().catch((error) => {
       console.warn(`[pi-lab server] activity reconciliation skipped: ${String(error)}`)
+    })
+    // Connect to a running PTY daemon now: one from an earlier build is replaced on
+    // first contact, which takes seconds, and must not fall in the bounded wait of
+    // the user's first Quit or Stop Server and Agents.
+    void this.terminalSupervisor.listSessionsIfRunning().catch((error: unknown) => {
+      console.warn(`[pi-lab server] pty-daemon check at start failed: ${String(error)}`)
     })
     void seedWritableTemplate().catch((error) => {
       console.warn("[pi-lab server] template seed skipped:", error)

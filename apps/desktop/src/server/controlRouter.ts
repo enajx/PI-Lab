@@ -16,6 +16,30 @@ import {
 } from "../main/updates/selection"
 import type { QuitWork } from "../main/window/userQuit"
 import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
+import {
+  answerRequestResultSchema,
+  appSettingsSchema,
+  backgroundTraySnapshotSchema,
+  createdDeviceSchema,
+  dataCompatibilitySchema,
+  deviceSchema,
+  legacyCredentialMoveSchema,
+  legacyCredentialSchema,
+  notebookCountSchema,
+  notificationEventSchema,
+  notificationStreamMessageSchema,
+  okSchema,
+  projectFileRouteSchema,
+  publicUpdateChannelSchema,
+  pythonRuntimeSchema,
+  quickPythonOptionsSchema,
+  quickPythonRunSchema,
+  quitWorkSchema,
+  SERVER_CAPABILITIES,
+  secretProtectionSchema,
+  serverHelloSchema,
+} from "../shared/clientApi"
+import { LOCAL_DEVICE_ID } from "./devices"
 import type { NotificationEvent, NotificationStreamMessage } from "./notificationFeed"
 import type { ServerRuntime } from "./runtime"
 
@@ -47,6 +71,19 @@ function control(ctx: AppContext): ServerControlPort {
   }
   return ctx.server
 }
+
+/** Device management and stopping the server are for the local device ("This Mac") only. */
+function localDeviceOnly(ctx: AppContext): void {
+  if (ctx.connection?.deviceId !== LOCAL_DEVICE_ID) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Only the local device can manage devices and stop the server",
+    })
+  }
+}
+
+/** Requests whose answer is being written now; a second answer meanwhile gets `already-answered`. */
+const answering = new Set<string>()
 
 /** Settings Electron main keeps a copy of. */
 export interface AppSettings {
@@ -84,83 +121,131 @@ const legacyInput = z.object({
  * work count, notifications, secrets and the one-time credential move.
  */
 export const serverControlRouter = router({
-  hello: publicProcedure.query(({ ctx }): ServerHello => {
+  hello: publicProcedure.output(serverHelloSchema).query(({ ctx }): ServerHello => {
     const { runtime } = control(ctx)
     return {
       protocol: PROTOCOL_VERSION,
       build: runtime.config.build,
       version: runtime.config.version,
       pid: process.pid,
-      capabilities: [],
+      capabilities: [...SERVER_CAPABILITIES],
     }
+  }),
+
+  /** Devices allowed to connect (see {@link DeviceRegistry}). */
+  devices: router({
+    list: publicProcedure
+      .output(z.array(deviceSchema))
+      .query(({ ctx }) => control(ctx).runtime.devices.list()),
+    /** Add a device; the reply is the only place its token is ever shown. */
+    create: publicProcedure
+      .input(z.object({ name: z.string().trim().min(1) }))
+      .output(createdDeviceSchema)
+      .mutation(({ ctx, input }) => {
+        localDeviceOnly(ctx)
+        return control(ctx).runtime.devices.create(input.name)
+      }),
+    /** Revoke a device: its open connections close and its token is refused from now on. */
+    revoke: publicProcedure
+      .input(z.object({ id: z.string().min(1) }))
+      .output(okSchema)
+      .mutation(({ ctx, input }): { ok: true } => {
+        localDeviceOnly(ctx)
+        const { devices } = control(ctx).runtime
+        if (input.id === LOCAL_DEVICE_ID) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "The local device cannot be revoked" })
+        }
+        if (!devices.list().some((device) => device.id === input.id)) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `No device ${input.id}` })
+        }
+        devices.revoke(input.id)
+        return { ok: true }
+      }),
   }),
 
   /** Stop the server; with `stopAgents` every agent, shell and the PTY daemon stop first. */
   stop: publicProcedure
     .input(z.object({ stopAgents: z.boolean() }))
+    .output(okSchema)
     .mutation(async ({ ctx, input }): Promise<{ ok: true }> => {
+      localDeviceOnly(ctx)
       const port = control(ctx)
       if (input.stopAgents) await port.runtime.stopAllWork()
       port.exit()
       return { ok: true }
     }),
 
-  quitWork: publicProcedure.query(({ ctx }): Promise<QuitWork> => control(ctx).runtime.quitWork()),
+  quitWork: publicProcedure
+    .output(quitWorkSchema)
+    .query(({ ctx }): Promise<QuitWork> => control(ctx).runtime.quitWork()),
   /** Open notebook tabs whose servers run; cheap, for the Quit dialog. */
-  notebookCount: publicProcedure.query(({ ctx }): number =>
-    control(ctx).runtime.notebookServers.runningCount(),
-  ),
+  notebookCount: publicProcedure
+    .output(notebookCountSchema)
+    .query(({ ctx }): number => control(ctx).runtime.notebookServers.runningCount()),
 
-  traySnapshot: publicProcedure.query(
-    ({ ctx }): BackgroundTraySnapshot => control(ctx).runtime.traySnapshot(),
-  ),
+  traySnapshot: publicProcedure
+    .output(backgroundTraySnapshotSchema)
+    .query(({ ctx }): BackgroundTraySnapshot => control(ctx).runtime.traySnapshot()),
   onTray: publicProcedure.subscription(({ ctx }) => {
     const { runtime } = control(ctx)
     return observable<BackgroundTraySnapshot>((emit) =>
-      runtime.activityRegistry.subscribe(() => emit.next(runtime.traySnapshot())),
+      runtime.activityRegistry.subscribe(() =>
+        emit.next(backgroundTraySnapshotSchema.parse(runtime.traySnapshot())),
+      ),
     )
   }),
   hasProject: publicProcedure
     .input(z.object({ id: z.string().min(1) }))
+    .output(z.boolean())
     .query(({ ctx, input }): boolean => control(ctx).runtime.hasProject(input.id)),
   /** The project holding a file, for opening it in the project editor. */
   projectForFile: publicProcedure
     .input(z.object({ path: z.string().min(1) }))
+    .output(projectFileRouteSchema)
     .query(({ ctx, input }) => control(ctx).runtime.projectRouteForFile(input.path)),
 
   /** Settings the desktop app reads outside the renderer. */
-  appSettings: publicProcedure.query(({ ctx }): AppSettings => appSettings(ctx)),
+  appSettings: publicProcedure
+    .output(appSettingsSchema)
+    .query(({ ctx }): AppSettings => appSettings(ctx)),
   /** The same settings, again after every settings change. */
   onAppSettings: publicProcedure.subscription(({ ctx }) => {
     const { runtime } = control(ctx)
     return observable<AppSettings>((emit) => {
-      emit.next(appSettings(ctx))
-      return runtime.onAppSettingsChanged(() => emit.next(appSettings(ctx)))
+      const send = () => emit.next(appSettingsSchema.parse(appSettings(ctx)))
+      send()
+      return runtime.onAppSettingsChanged(send)
     })
   }),
   /** Re-read the interface language the desktop app saved, for notification text. */
-  reloadLanguage: publicProcedure.mutation(({ ctx }) => {
+  reloadLanguage: publicProcedure.output(z.void()).mutation(({ ctx }) => {
     loadNativeLanguage(control(ctx).runtime.config.profileDir)
   }),
   rememberQuitChoice: publicProcedure
     .input(z.object({ choice: z.literal("background") }))
+    .output(z.void())
     .mutation(({ ctx, input }) => {
       writeGeneralSettings(ctx.db, { quitChoice: input.choice })
     }),
   /** Seed a new public install's update channel before setup writes settings. */
   initPublicUpdateChannel: publicProcedure
     .input(z.object({ channel: z.enum(["stable", "beta"]) }).nullable())
+    .output(z.void())
     .mutation(({ ctx, input }) => {
       initializePublicUpdateChannel(ctx.db, input)
     }),
 
   /** The data format of this server's database, for the desktop updater. */
-  updateCompatibility: publicProcedure.query((): DataCompatibility => getDbStatus().compatibility),
+  updateCompatibility: publicProcedure
+    .output(dataCompatibilitySchema)
+    .query((): DataCompatibility => getDbStatus().compatibility),
   /** The selected public update channel now, then again after each change. */
   onPublicUpdateChannel: publicProcedure.subscription(({ ctx }) =>
     observable<PublicUpdateChannel>((emit) => {
-      emit.next(getSettingsOrDefaults(ctx.db).publicUpdateChannel)
-      return onPublicUpdateChannelChanged((channel) => emit.next(channel))
+      const send = (channel: PublicUpdateChannel) =>
+        emit.next(publicUpdateChannelSchema.parse(channel))
+      send(getSettingsOrDefaults(ctx.db).publicUpdateChannel)
+      return onPublicUpdateChannelChanged(send)
     }),
   ),
 
@@ -168,16 +253,53 @@ export const serverControlRouter = router({
   onNotification: publicProcedure.subscription(({ ctx }) => {
     const { runtime } = control(ctx)
     return observable<NotificationStreamMessage>((emit) =>
-      runtime.notifications.subscribe((message) => emit.next(message)),
+      runtime.notifications.subscribe((message) =>
+        emit.next(notificationStreamMessageSchema.parse(message)),
+      ),
     )
   }),
-  notificationHistory: publicProcedure.query(({ ctx }): NotificationEvent[] =>
-    control(ctx).runtime.notifications.history(),
-  ),
+  /**
+   * Answer a pending request from any device. The first answer is typed into
+   * the agent's terminal (text and Enter, in bracketed paste when the program
+   * turned it on) and the request clears everywhere once the write succeeded;
+   * any other answer gets `already-answered` and writes nothing. A failed
+   * write leaves the request pending and returns the error.
+   */
+  answerRequest: publicProcedure
+    .input(z.object({ requestId: z.string().min(1), text: z.string() }))
+    .output(answerRequestResultSchema)
+    .mutation(async ({ ctx, input }): Promise<{ status: "accepted" | "already-answered" }> => {
+      const { notifications } = control(ctx).runtime
+      // Checked and claimed synchronously, before any await, so two answers can never both write.
+      const event = notifications.pending(input.requestId)
+      if (!event || answering.has(input.requestId)) return { status: "already-answered" }
+      const target = event.request.target
+      if (target.type !== "agent") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Request ${input.requestId} is not an agent request`,
+        })
+      }
+      answering.add(input.requestId)
+      const written = (async () => {
+        const daemon = await ctx.getDaemonClient()
+        ctx.activityMonitor.userInput(target.sessionId, `${input.text}\r`)
+        await daemon.writeMessage(target.sessionId, input.text)
+      })()
+      await written.finally(() => answering.delete(input.requestId))
+      notifications.take(input.requestId)
+      return { status: "accepted" }
+    }),
+  notificationHistory: publicProcedure
+    .output(z.array(notificationEventSchema))
+    .query(({ ctx }): NotificationEvent[] => control(ctx).runtime.notifications.history()),
 
-  secretProtection: publicProcedure.query(({ ctx }) => control(ctx).runtime.secrets.protection()),
+  secretProtection: publicProcedure
+    .output(secretProtectionSchema)
+    .query(({ ctx }) => control(ctx).runtime.secrets.protection()),
   setSecretProtection: publicProcedure
     .input(z.object({ mode: z.enum(["file", "keychain"]) }))
+    .output(secretProtectionSchema)
     .mutation(({ ctx, input }) => {
       const { secrets } = control(ctx).runtime
       secrets.setProtection(input.mode)
@@ -185,32 +307,35 @@ export const serverControlRouter = router({
     }),
 
   /** Credentials still in the old safeStorage format, for the desktop app to move. */
-  legacyCredentials: publicProcedure.query(({ ctx }): LegacyCredential[] => {
-    const { secrets } = control(ctx).runtime
-    return [
-      ...ctx.db
-        .select()
-        .from(agentCredentials)
-        .all()
-        .map((row) => ({
-          table: "agent" as const,
-          key: row.agentId,
-          encryptedValue: row.encryptedValue,
-        })),
-      ...ctx.db
-        .select()
-        .from(serviceCredentials)
-        .all()
-        .map((row) => ({
-          table: "service" as const,
-          key: row.service,
-          encryptedValue: row.encryptedValue,
-        })),
-    ].filter((row) => !secrets.isCurrentFormat(row.encryptedValue))
-  }),
+  legacyCredentials: publicProcedure
+    .output(z.array(legacyCredentialSchema))
+    .query(({ ctx }): LegacyCredential[] => {
+      const { secrets } = control(ctx).runtime
+      return [
+        ...ctx.db
+          .select()
+          .from(agentCredentials)
+          .all()
+          .map((row) => ({
+            table: "agent" as const,
+            key: row.agentId,
+            encryptedValue: row.encryptedValue,
+          })),
+        ...ctx.db
+          .select()
+          .from(serviceCredentials)
+          .all()
+          .map((row) => ({
+            table: "service" as const,
+            key: row.service,
+            encryptedValue: row.encryptedValue,
+          })),
+      ].filter((row) => !secrets.isCurrentFormat(row.encryptedValue))
+    }),
   /** Re-encrypt one moved credential; a row changed meanwhile is left alone. */
   moveLegacyCredential: publicProcedure
     .input(legacyInput)
+    .output(legacyCredentialMoveSchema)
     .mutation(({ ctx, input }): { moved: boolean } => {
       const encryptedValue = control(ctx).runtime.secrets.encrypt(input.plaintext)
       const updatedAt = Date.now()
@@ -240,21 +365,23 @@ export const serverControlRouter = router({
     }),
 
   /** Stop every notebook server: the desktop page that showed them reloaded or closed. */
-  stopNotebooks: publicProcedure.mutation(({ ctx }) =>
-    control(ctx).runtime.notebookServers.stopAll(),
-  ),
+  stopNotebooks: publicProcedure
+    .output(z.void())
+    .mutation(({ ctx }) => control(ctx).runtime.notebookServers.stopAll()),
 
   /** Stop every Analysis preview (marimo, report grants): the desktop page that showed them went away. */
-  stopAnalysisPreviews: publicProcedure.mutation(({ ctx }) =>
-    control(ctx).runtime.analysisInteractive.closeAll(),
-  ),
+  stopAnalysisPreviews: publicProcedure
+    .output(z.void())
+    .mutation(({ ctx }) => control(ctx).runtime.analysisInteractive.closeAll()),
 
   /** Quick Editor's Python run, through the server's PTY daemon. */
   quickPythonOptions: publicProcedure
     .input(z.object({ path: z.string().min(1) }))
+    .output(quickPythonOptionsSchema)
     .query(({ ctx, input }) => control(ctx).runtime.quickPython.options(input.path)),
   quickPythonSelect: publicProcedure
     .input(z.object({ path: z.string().min(1), interpreter: z.string().min(1).nullable() }))
+    .output(pythonRuntimeSchema)
     .mutation(({ ctx, input }) =>
       control(ctx).runtime.quickPython.select(input.path, input.interpreter),
     ),
@@ -266,10 +393,12 @@ export const serverControlRouter = router({
         rows: z.number().int().positive(),
       }),
     )
+    .output(quickPythonRunSchema)
     .mutation(({ ctx, input }) =>
       control(ctx).runtime.quickPython.run(input.path, input.cols, input.rows),
     ),
   quickPythonKill: publicProcedure
     .input(z.object({ sessionId: z.string().min(1) }))
+    .output(z.void())
     .mutation(({ ctx, input }) => control(ctx).runtime.quickPython.kill(input.sessionId)),
 })

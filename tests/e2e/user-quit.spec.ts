@@ -276,7 +276,7 @@ test("Stop Server and Agents names a busy terminal, Cancel keeps it, and with id
 })
 
 /** The app is real; the adopted daemon is a stand-in for one from an earlier build. */
-test("Stop Server and Agents stops an adopted daemon from an earlier build that ignores shutdown", async () => {
+test("an adopted daemon from an earlier build that ignores shutdown is replaced at server start, and Stop Server and Agents then quits", async () => {
   test.skip(process.platform === "win32", "Fixture uses a Unix socket and process listing")
   test.setTimeout(60_000)
   const dataDir = await mkdtemp(join(tmpdir(), "pi-lab-e2e-old-daemon-"))
@@ -328,11 +328,14 @@ net.createServer((socket) => {
       // No work runs, so no dialog is expected; a stray one gets Cancel.
       dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
     })
+    // The server replaces the old daemon at start (it ignores shutdown, so it is
+    // stopped by pid), before the user's Stop Server and its bounded wait.
+    await oldExited
+    expect(old.signalCode).toBe("SIGTERM")
     const closed = new Promise((resolve) => app?.once("close", resolve))
     await clickStopServer(app)
     await closed
-    await oldExited
-    expect(old.signalCode).toBe("SIGTERM")
+    await expect.poll(() => daemonPidFor(socketPath)).toBeUndefined()
   } finally {
     if (app) {
       const closed = (app as ElectronApplication).waitForEvent("close")

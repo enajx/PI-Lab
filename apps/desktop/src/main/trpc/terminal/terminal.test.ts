@@ -166,7 +166,7 @@ async function collect(sessionId: string): Promise<{
 }
 
 describe("terminal router", () => {
-  test("a reset on the real socket rejects pending RPCs and errors the active stream", async () => {
+  test("a reset on the real socket rejects pending RPCs and errors the active stream when it cannot attach again", async () => {
     const session = await client.spawn({ command: "cat", args: [] })
     const errors: Error[] = []
     const stream = await caller.terminal.onData({ sessionId: session.id })
@@ -178,10 +178,12 @@ describe("terminal router", () => {
     socket.destroy(Object.assign(new Error("connection reset"), { code: "ECONNRESET" }))
     await pending
     await waitFor(() => errors.length === 1)
-    expect(errors[0]?.message).toBe("daemon connection closed")
+    expect(errors[0]?.message).toBe(
+      "daemon connection closed, and attaching again failed: client is not connected",
+    )
   })
 
-  test("reports connection closure instead of leaving the terminal stream pending", async () => {
+  test("reports connection closure instead of leaving the terminal stream pending when it cannot attach again", async () => {
     const session = await client.spawn({ command: "cat", args: [] })
     const errors: Error[] = []
     const stream = await caller.terminal.onData({ sessionId: session.id })
@@ -190,10 +192,12 @@ describe("terminal router", () => {
     await client.list()
     client.close()
     await waitFor(() => errors.length === 1)
-    expect(errors[0]?.message).toBe("daemon connection closed")
+    expect(errors[0]?.message).toBe(
+      "daemon connection closed, and attaching again failed: client is not connected",
+    )
   })
 
-  test("a subscriber after process exit receives scrollback before exit", async () => {
+  test("a subscriber after process exit receives the screen before exit", async () => {
     const { sessionId } = await caller.terminal.spawn({
       command: NODE,
       args: ["-e", "process.stdout.write('FINAL-REPLAY')"],
@@ -210,7 +214,8 @@ describe("terminal router", () => {
     subscriptions.push(stream.subscribe({ next: (event) => events.push(event) }))
     await waitFor(() => events.some((event) => event.type === "exit"))
     expect(events).toEqual([
-      { type: "data", chunk: "FINAL-REPLAY" },
+      // The screen snapshot ends with the cursor position.
+      { type: "data", chunk: expect.stringContaining("FINAL-REPLAY") },
       expect.objectContaining({ type: "exit", exitCode: 0 }),
     ])
   })
@@ -316,7 +321,7 @@ describe("terminal router", () => {
     })
 
     const { chunks } = await collect(sessionId)
-    await caller.terminal.resize({ sessionId, cols: 120, rows: 40 })
+    await caller.terminal.resize({ sessionId, cols: 120, rows: 40, clientId: "test-client" })
     await caller.terminal.write({ sessionId, data: "\n" })
     await waitFor(() => /SIZE 120x40/.test(chunks.join("")))
     expect(chunks.join("")).toMatch(/SIZE 120x40/)

@@ -5,6 +5,8 @@ import { withFileOperation } from "./fileOperations"
 import type { OpenBuffer } from "./useEditorBuffers"
 
 export const BUFFER_ID = Symbol("buffer identity")
+/** How long a save waits for the server before the tab is marked "not saved". */
+const SAVE_REPLY_TIMEOUT_MS = 5_000
 export const EDIT_REVISION = Symbol("edit revision")
 export type LiveBuffer = OpenBuffer & { [BUFFER_ID]: symbol; [EDIT_REVISION]: number }
 
@@ -38,6 +40,20 @@ export async function saveBuffer(
   const snapshot = access.read().find((entry) => entry.relPath === relPath)
   if (!snapshot || snapshot.kind === "pdf" || (snapshot.externalChange && !overwrite)) return false
   access.reportError(null)
+  // A save that fails, or gets no reply in time (server unreachable), keeps the
+  // buffer and marks it "not saved"; a later successful save clears the mark.
+  const markNotSaved = () => {
+    if (!access.current(snapshot)) return
+    access.update((previous) =>
+      previous.map((entry) =>
+        entry[BUFFER_ID] === snapshot[BUFFER_ID] ? { ...entry, notSaved: true } : entry,
+      ),
+    )
+  }
+  const awaitReply = <T>(call: Promise<T>): Promise<T> => {
+    const stalled = setTimeout(markNotSaved, SAVE_REPLY_TIMEOUT_MS)
+    return call.finally(() => clearTimeout(stalled))
+  }
   return withFileOperation(workspaceId, relPath, async () => {
     let current = access.current(snapshot)
     if (
@@ -46,7 +62,7 @@ export async function saveBuffer(
       (current.externalChange && !overwrite)
     )
       return false
-    const before = await client.files.stat.query({ workspaceId, relPath })
+    const before = await awaitReply(client.files.stat.query({ workspaceId, relPath }))
     current = access.current(snapshot)
     if (!current || current[EDIT_REVISION] !== snapshot[EDIT_REVISION]) return false
     if (!overwrite && (current.externalChange || diskChanged(current, before))) {
@@ -57,11 +73,27 @@ export async function saveBuffer(
       )
       return false
     }
-    const written = await client.files.write.mutate({
-      workspaceId,
-      relPath,
-      content: snapshot.content,
-    })
+    const written = await awaitReply(
+      client.files.write.mutate({
+        workspaceId,
+        relPath,
+        content: snapshot.content,
+        // The server refuses the write if the file is no longer the opened version.
+        expected: overwrite
+          ? null
+          : { mtimeMs: current.baseline.mtimeMs, size: current.baseline.size },
+      }),
+    )
+    if (written.status === "conflict") {
+      access.update((previous) =>
+        previous.map((entry) =>
+          entry[BUFFER_ID] === snapshot[BUFFER_ID]
+            ? { ...entry, externalChange: true, notSaved: undefined }
+            : entry,
+        ),
+      )
+      return false
+    }
     let savedContent = snapshot.content
     let baseline = written.baseline
     let formatted = false
@@ -103,6 +135,7 @@ export async function saveBuffer(
               savedContent,
               baseline,
               rejectedRead: undefined,
+              notSaved: undefined,
               externalChange: !written.matchesWrittenContent || (formatted && !unchanged),
               epoch: formatted && unchanged ? entry.epoch + 1 : entry.epoch,
             }
@@ -112,6 +145,7 @@ export async function saveBuffer(
     access.onSaved(relPath)
     return unchanged && written.matchesWrittenContent
   }).catch((cause: unknown) => {
+    markNotSaved()
     if (access.current(snapshot)) access.reportError(`Could not save ${relPath}: ${String(cause)}`)
     return false
   })
@@ -155,7 +189,9 @@ export async function saveBufferAs(
       workspaceId: targetWorkspaceId,
       relPath: targetRelPath,
       content: snapshot.content,
+      expected: { mtimeMs: before.mtimeMs, size: before.size },
     })
+    if (written.status === "conflict") throw new Error(`${targetRelPath} changed while saving`)
     const current = access.current(snapshot)
     if (!current) return { saved: false }
     const unchanged = current[EDIT_REVISION] === snapshot[EDIT_REVISION]

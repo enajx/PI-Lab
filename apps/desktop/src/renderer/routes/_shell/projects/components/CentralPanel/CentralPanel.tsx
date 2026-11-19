@@ -385,7 +385,7 @@ export function CentralPanel({
             onClose={() => controller.closeSession(session.id)}
           />
         ),
-        content: () => (
+        content: ({ visible }) => (
           <div
             data-testid="central-session"
             data-session-kind={session.kind}
@@ -396,6 +396,7 @@ export function CentralPanel({
               client={client}
               inputKind={session.kind}
               sessionId={session.sessionId}
+              visible={visible}
             />
           </div>
         ),
@@ -424,6 +425,7 @@ export function CentralPanel({
             kind="file"
             label={basename(tab.relPath)}
             dirty={tab.dirty}
+            notSaved={tab.notSaved}
             active={visible}
             onSelect={activate}
             onClose={() => closeFilePrompt.requestClose(tab.relPath)}
@@ -496,13 +498,14 @@ export function CentralPanel({
                 onClose={controller.closeBelowEditorRun}
               />
             ),
-            content: () => (
+            content: ({ visible }) => (
               <div data-testid="editor-run-terminal" className="flex min-h-0 flex-1 flex-col">
                 <Terminal
                   key={belowEditorRun.sessionId}
                   client={client}
                   inputKind="terminal"
                   sessionId={belowEditorRun.sessionId}
+                  visible={visible}
                 />
               </div>
             ),
@@ -1401,6 +1404,8 @@ export interface CentralTabProps {
   label: string
   active: boolean
   dirty?: boolean
+  /** The last save of this file failed or got no reply; its text is only in the editor. */
+  notSaved?: boolean
   /** Optional trailing badge (the worktree-policy kind badge for agent tabs). */
   badge?: ReactNode
   onSelect: () => void
@@ -1413,6 +1418,7 @@ export function CentralTab({
   label,
   active,
   dirty,
+  notSaved,
   badge,
   onSelect,
   onClose,
@@ -1464,6 +1470,11 @@ export function CentralTab({
             data-testid="central-tab-dirty"
             className="size-1.5 shrink-0 rounded-full bg-foreground/60"
           />
+        ) : null}
+        {notSaved ? (
+          <span data-testid="central-tab-not-saved" className="shrink-0 text-destructive">
+            {t("Not saved")}
+          </span>
         ) : null}
       </button>
       {badge ? <span className="shrink-0">{badge}</span> : null}

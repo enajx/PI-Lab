@@ -42,11 +42,13 @@ describe("files.read / files.write round-trip", () => {
     const ws = await makeWorkspace()
 
     const written = await h.caller.files.write({
+      expected: null,
       workspaceId: ws.id,
       relPath: "RESEARCH.md",
       content: "# Research\n\nfindings\n",
     })
-    expect(written.bytes).toBeGreaterThan(0)
+    expect(written).toMatchObject({ status: "saved" })
+    expect(written.status === "saved" && written.bytes).toBeGreaterThan(0)
 
     const result = await h.caller.files.read({ workspaceId: ws.id, relPath: "RESEARCH.md" })
     expect(result.exists).toBe(true)
@@ -59,6 +61,7 @@ describe("files.read / files.write round-trip", () => {
   test("write creates missing parent directories", async () => {
     const ws = await makeWorkspace()
     await h.caller.files.write({
+      expected: null,
       workspaceId: ws.id,
       relPath: "notes/deep/todo.md",
       content: "- [ ] task\n",
@@ -100,6 +103,7 @@ describe("files path-traversal guard", () => {
     const ws = await makeWorkspace()
     await expect(
       h.caller.files.write({
+        expected: null,
         workspaceId: ws.id,
         relPath: "../escape.txt",
         content: "nope",
@@ -152,7 +156,12 @@ describe("resolveInsideDir (pure)", () => {
 test("read and post-write verification return text with its own disk fingerprint", async () => {
   const ws = await makeWorkspace()
   const content = "paired UTF-8 text: π\n"
-  const written = await h.caller.files.write({ workspaceId: ws.id, relPath: "paired.txt", content })
+  const written = await h.caller.files.write({
+    expected: null,
+    workspaceId: ws.id,
+    relPath: "paired.txt",
+    content,
+  })
   const actual = await stat(join(ws.dir, "paired.txt"))
   expect(written).toMatchObject({
     bytes: Buffer.byteLength(content),
@@ -171,11 +180,12 @@ test("post-write verification reports a real external replacement (injected timi
     await writeFile(path, "external replacement")
   })
   const result = await h.caller.files.write({
+    expected: null,
     workspaceId: ws.id,
     relPath: "paired.txt",
     content: "local",
   })
-  expect(result.matchesWrittenContent).toBe(false)
+  expect(result).toMatchObject({ status: "saved", matchesWrittenContent: false })
   const current = await stat(join(ws.dir, "paired.txt"))
   expect(result.baseline).toEqual({ exists: true, mtimeMs: current.mtimeMs, size: current.size })
   expect(await readFile(join(ws.dir, "paired.txt"), "utf8")).toBe("external replacement")
@@ -184,8 +194,13 @@ test("post-write verification reports a real external replacement (injected timi
 test("bounded router reads reject oversize/binary contents and still verify saves above 10 MB", async () => {
   const ws = await makeWorkspace()
   const content = `${"x".repeat(10_000_000)}😀`
-  const written = await h.caller.files.write({ workspaceId: ws.id, relPath: "large.txt", content })
-  expect(written.matchesWrittenContent).toBe(true)
+  const written = await h.caller.files.write({
+    expected: null,
+    workspaceId: ws.id,
+    relPath: "large.txt",
+    content,
+  })
+  expect(written).toMatchObject({ status: "saved", matchesWrittenContent: true })
   expect(written).not.toHaveProperty("content")
   expect(written.baseline.size).toBe(10_000_004)
   const read = await h.caller.files.read({ workspaceId: ws.id, relPath: "large.txt" })
@@ -213,4 +228,37 @@ test("Reveal in Finder passes jailed real files to the adapter and rejects symli
     h.caller.files.reveal({ workspaceId: ws.id, relPath: "escape.txt" }),
   ).rejects.toMatchObject({ code: "FORBIDDEN" })
   expect(reveal).toHaveBeenCalledTimes(1)
+})
+
+test("save checks the opened version: a file changed since it was opened is a conflict and stays on disk", async () => {
+  const ws = await makeWorkspace()
+  const path = join(ws.dir, "notes.md")
+  await writeFile(path, "opened text\n")
+  const opened = await h.caller.files.read({ workspaceId: ws.id, relPath: "notes.md" })
+  if (opened.status !== "text") throw new Error("expected text")
+
+  // An agent edits the file after it was opened.
+  await writeFile(path, "agent edit, longer than before\n")
+  const conflict = await h.caller.files.write({
+    workspaceId: ws.id,
+    relPath: "notes.md",
+    content: "my unsaved text\n",
+    expected: opened.baseline,
+  })
+  const current = await stat(path)
+  expect(conflict).toEqual({
+    status: "conflict",
+    baseline: { exists: true, mtimeMs: current.mtimeMs, size: current.size },
+  })
+  expect(await readFile(path, "utf8")).toBe("agent edit, longer than before\n")
+
+  // Against the version on disk now (or with no check: Overwrite) the save goes through.
+  const saved = await h.caller.files.write({
+    workspaceId: ws.id,
+    relPath: "notes.md",
+    content: "my unsaved text\n",
+    expected: conflict.baseline,
+  })
+  expect(saved).toMatchObject({ status: "saved", matchesWrittenContent: true })
+  expect(await readFile(path, "utf8")).toBe("my unsaved text\n")
 })

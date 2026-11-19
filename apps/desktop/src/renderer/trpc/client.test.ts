@@ -1,7 +1,6 @@
 import type { Operation } from "@trpc/client"
 import { initTRPC } from "@trpc/server"
 import type { TRPCResponseMessage } from "@trpc/server/rpc"
-import superjson from "superjson"
 import { afterEach, expect, test, vi } from "vitest"
 import { z } from "zod"
 import { isDesktopPath } from "../../shared/desktopPaths"
@@ -9,7 +8,7 @@ import { createIpcClient } from "./client"
 
 afterEach(() => vi.unstubAllGlobals())
 
-const t = initTRPC.create({ transformer: superjson })
+const t = initTRPC.create()
 const fixtureRouter = t.router({
   health: t.router({ ping: t.procedure.query(() => ({ ok: true, echo: "pong", at: 1 })) }),
   terminal: t.router({
@@ -40,7 +39,7 @@ test("independent clients receive their own replies when local request counters 
         : { sessionId: "the-terminal-session" }
     const reply: TRPCResponseMessage = {
       id: request.id,
-      result: { type: "data", data: superjson.serialize(data) },
+      result: { type: "data", data },
     }
     for (const listener of listeners) listener(reply)
   }

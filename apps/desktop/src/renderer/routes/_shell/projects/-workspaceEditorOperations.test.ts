@@ -134,7 +134,11 @@ describe("inactive project saves through shared editor operations (mocked IPC)",
 
   test("cross-project Save As moves the written buffer to the selected workspace", async () => {
     const store = setup()
-    const write = vi.fn(() => ({ baseline: { mtimeMs: 2, size: 5 }, matchesWrittenContent: true }))
+    const write = vi.fn(() => ({
+      status: "saved",
+      baseline: { mtimeMs: 2, size: 5 },
+      matchesWrittenContent: true,
+    }))
     const client = createFakeTrpcClient({
       "workspaces.ensureMain": () => ({ id: "target-ws" }),
       "files.stat": () => ({ exists: true, mtimeMs: 2, size: 0 }),
@@ -153,6 +157,7 @@ describe("inactive project saves through shared editor operations (mocked IPC)",
       workspaceId: "target-ws",
       relPath: "saved.md",
       content: "draft",
+      expected: { mtimeMs: 2, size: 0 },
     })
     expect(store.read("source", true)?.buffers).toEqual([])
     expect(store.read("target", true)?.buffers[0]).toMatchObject({

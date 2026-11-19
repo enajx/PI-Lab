@@ -1,0 +1,11 @@
+# Dependencies and build output of the Expo check client.
+node_modules/
+.expo/
+dist/
+expo-env.d.ts
+.metro-health-check*
+# Native project from `expo prebuild`, made again by run-check.mjs.
+ios/
+android/
+# The lockfile is kept (the root .gitignore ignores package-lock.json).
+!package-lock.json

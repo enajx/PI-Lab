@@ -1,14 +1,65 @@
 // In-memory ownership of live PTY sessions. The store outlives any individual
 // client connection: sessions keep running while no one is attached, and a
-// reconnecting client replays recent scrollback then resumes the live stream.
+// reconnecting client resumes from its offset or starts from a screen snapshot.
 
 import { randomUUID } from "node:crypto"
+import termiosAddon from "@pi-lab/pty-termios"
 import { type IPty, spawn } from "node-pty"
-import type { SessionInfo } from "./protocol"
-import { Scrollback } from "./scrollback"
+import { ByteTail } from "./byteTail"
+import {
+  ECHO_ACK_DELAY_MS,
+  type InputFlags,
+  type KeyInput,
+  type KeyStatus,
+  type ResumePoint,
+  type SessionInfo,
+} from "./protocol"
+import { ScreenState } from "./screen"
 
-/** How much PTY output to retain per session for replay on (re)attach. */
+/** How many raw PTY bytes to retain per session for replay on (re)attach. */
 const DEFAULT_SCROLLBACK_BYTES = 256 * 1024
+
+/**
+ * Reads the ECHO bit of a PTY's termios (`tcgetattr` on the master fd, under
+ * 1 µs) and turns on IUTF8. Windows has no termios, so there the flag is
+ * taken as always on.
+ */
+const termios = termiosAddon
+
+/** What a failed flag read is taken as: a hidden prompt, so no client predicts. */
+const UNREADABLE_FLAGS: InputFlags = { echo: false, icanon: true }
+
+/** Typists remembered per session (oldest forgotten first). */
+const TYPIST_LIMIT = 64
+
+/** What the daemon remembers about one client typing into one session. */
+interface Typist {
+  /** The last key written. */
+  lastSeq: number
+  /**
+   * Where the echo ack of the last written key was sent, or null while it is
+   * still pending: output before it may be that key's own echo.
+   */
+  lastAckOffset: number | null
+  /** A resent key was dropped; later resends are dropped too, until a first send. */
+  dropping: boolean
+}
+
+function sameFlags(a: InputFlags, b: InputFlags): boolean {
+  return a.echo === b.echo && a.icanon === b.icanon
+}
+
+/**
+ * ECHO off in canonical mode: a hidden prompt (read -s, getpass, sudo). With
+ * ICANON off too the program reads keys raw and echoes them itself (a shell's
+ * line editor, a full-screen app).
+ */
+function hiddenInput(flags: InputFlags): boolean {
+  return !flags.echo && flags.icanon
+}
+
+/** A replay at most this long is sent without comparing it with a screen refresh. */
+export const SMALL_REPLAY_BYTES = 16 * 1024
 
 export interface SpawnOptions {
   command: string
@@ -21,9 +72,22 @@ export interface SpawnOptions {
 
 /** Listeners notified for the lifetime of a single session. */
 export interface SessionListener {
-  onData(chunk: string): void
+  /** Raw PTY bytes; `offset` is the offset of the first one. */
+  onData(bytes: Buffer, offset: number): void
+  /** The PTY was resized after every byte before `offset`. */
+  onResize(cols: number, rows: number, revision: number, offset: number): void
+  /** The PTY's ECHO flag changed; it applies at `offset`. */
+  onEcho(flags: InputFlags, offset: number): void
+  /** A typed key's echo ack, {@link ECHO_ACK_DELAY_MS} after it was written. */
+  onEchoAck(key: KeyInput, offset: number, flags: InputFlags): void
   onExit(exitCode: number | null, signal: number | null): void
 }
+
+/** How an attach starts, with raw bytes; see `AttachStartFrame` in the protocol. */
+export type SessionStart =
+  | { mode: "replay"; offset: number; bytes: Buffer }
+  | { mode: "snapshot"; offset: number; screen: string; bytes: Buffer }
+  | { mode: "refresh"; base: ResumePoint; offset: number; screen: string; bytes: Buffer }
 
 interface ExitState {
   exitCode: number | null
@@ -31,9 +95,11 @@ interface ExitState {
 }
 
 /**
- * A single PTY plus its replay buffer and subscribers.
+ * A single PTY plus its byte tail, headless emulator and subscribers.
  *
- * Scrollback retains a capped UTF-16 suffix in chunks and joins on attach.
+ * The byte offset counts raw PTY bytes since spawn. The revision changes when
+ * the screen changes without new bytes (a resize); `revisionOffset` is the
+ * offset at which the current revision began.
  */
 class Session {
   readonly id = randomUUID()
@@ -44,19 +110,37 @@ class Session {
 
   private readonly pty: IPty
   private readonly processGroupId: number
-  private readonly scrollback: Scrollback
+  private readonly tail: ByteTail
+  private readonly screen: ScreenState
+  private revision = 0
+  private revisionOffset = 0
+  private disposed = false
   private cols: number
   private rows: number
   private exitState: ExitState | null = null
   private readonly listeners = new Set<SessionListener>()
+  /** The PTY's ECHO flag as last read. */
+  private echoFlag: InputFlags = { echo: true, icanon: true }
+  /** Set once a failed flag read was logged, so it is logged once per session. */
+  private echoErrorLogged = false
+  private readonly typists = new Map<string, Typist>()
 
-  constructor(options: SpawnOptions, scrollbackCap: number) {
+  constructor(
+    options: SpawnOptions,
+    scrollbackCap: number,
+    readonly generation: string,
+  ) {
     this.command = options.command
     this.args = options.args ?? []
     this.cwd = options.cwd ?? process.cwd()
     this.cols = options.cols ?? 80
     this.rows = options.rows ?? 24
-    this.scrollback = new Scrollback(scrollbackCap)
+    this.tail = new ByteTail(scrollbackCap)
+    this.screen = new ScreenState(this.cols, this.rows, scrollbackCap, (heldBytes) =>
+      console.warn(
+        `[pty-daemon] session ${this.id}: parser reset after ${heldBytes} bytes inside one sequence`,
+      ),
+    )
 
     const inheritedEnv = { ...process.env }
     delete inheritedEnv.ELECTRON_RUN_AS_NODE
@@ -67,13 +151,40 @@ class Session {
       rows: this.rows,
       cwd: this.cwd,
       env: { ...(inheritedEnv as Record<string, string>), ...options.env },
+      // Raw bytes: offsets, retention and replay count PTY bytes, not decoded text.
+      encoding: null,
     })
 
     this.processGroupId = this.pty.pid
+    if (termios !== null) {
+      // node-pty sets IUTF8 only for `encoding: "utf8"`. Raw-byte output leaves
+      // it off, so a program reading cooked-mode lines would erase one byte of
+      // a non-ASCII character.
+      const failed = termios.setUtf8(this.masterFd())
+      if (failed !== null) {
+        this.pty.kill("SIGKILL")
+        throw new Error(`cannot turn on UTF-8 line editing (IUTF8) for the new PTY: ${failed}`)
+      }
+    }
+    this.echoFlag = this.readEcho()
 
-    this.pty.onData((chunk) => {
-      this.scrollback.append(chunk)
-      for (const listener of this.listeners) listener.onData(chunk)
+    this.pty.onData((data) => {
+      // With `encoding: null` node-pty delivers Buffers despite its string typing.
+      const bytes = data as unknown as Buffer
+      // Output that a killed PTY flushes after teardown has nowhere to go.
+      if (this.disposed) return
+      const offset = this.tail.end
+      // Echo turned off before this output was read (a password prompt): off from its start.
+      // Hidden input began before this output was read (a password prompt): from its start.
+      const flags = this.readEcho()
+      const changed = !sameFlags(flags, this.echoFlag)
+      if (changed && hiddenInput(flags)) this.setEcho(flags, offset)
+      this.tail.append(bytes)
+      this.screen.feed(bytes)
+      for (const listener of this.listeners) listener.onData(bytes, offset)
+      // Turned on again: on only after this output.
+      // Any other change applies only after this output.
+      if (changed && !hiddenInput(flags)) this.setEcho(flags, this.tail.end)
     })
 
     this.pty.onExit(({ exitCode, signal }) => {
@@ -105,12 +216,80 @@ class Session {
     }
   }
 
-  getScrollback(): string {
-    return this.scrollback.text()
+  /**
+   * How a client at `resume` starts, smallest first:
+   * 1. replay, when the point is in this generation, at the current revision
+   *    (no resize since), still retained, and the replay is at most
+   *    {@link SMALL_REPLAY_BYTES} or the size of a refresh;
+   * 2. refresh (the current screen over the client's own history), when the
+   *    generation matches, at most one resize happened since the client's
+   *    revision, the normal buffer's history did not change after the
+   *    client's offset (so the client's history is already right), and its
+   *    first visible row does not continue a history line;
+   * 3. otherwise a snapshot.
+   */
+  startFrom(resume: ResumePoint | null, preferReplay: boolean): SessionStart {
+    if (resume === null || resume.generation !== this.generation || resume.offset > this.tail.end)
+      return { mode: "snapshot", ...this.screen.snapshot() }
+    const replay =
+      resume.revision === this.revision && resume.offset >= this.revisionOffset
+        ? this.tail.from(resume.offset)
+        : null
+    if (replay !== null && (preferReplay || replay.length <= SMALL_REPLAY_BYTES))
+      return { mode: "replay", offset: resume.offset, bytes: replay }
+    const refreshable =
+      resume.revision <= this.revision &&
+      this.revision - resume.revision <= 1 &&
+      resume.offset >= this.screen.historyStableFrom &&
+      !this.screen.firstRowContinuesHistory()
+    if (!refreshable) return { mode: "snapshot", ...this.screen.snapshot() }
+    const refresh = this.screen.refresh()
+    if (replay !== null && replay.length <= refresh.screen.length + refresh.bytes.length)
+      return { mode: "replay", offset: resume.offset, bytes: replay }
+    return { mode: "refresh", base: resume, ...refresh }
+  }
+
+  get screenRevision(): number {
+    return this.revision
+  }
+
+  /** The PTY's ECHO and ICANON flags as last sent to listeners. */
+  get echo(): InputFlags {
+    return this.echoFlag
+  }
+
+  /** The PTY master fd, which node-pty keeps in `fd` (not in its public type). */
+  private masterFd(): number {
+    const fd = (this.pty as IPty & { fd?: number }).fd
+    if (typeof fd !== "number") throw new Error("node-pty did not expose the PTY master fd")
+    return fd
   }
 
   /**
-   * Register a listener and return its current scrollback. If the session has
+   * Read the ECHO and ICANON flags from the PTY master. A failed read (the
+   * PTY is closing) counts as a hidden prompt for that read, so no client
+   * predicts; the first failure is logged.
+   */
+  private readEcho(): InputFlags {
+    if (termios === null || this.disposed || !this.alive) return this.echoFlag
+    const flags = termios.localFlags(this.masterFd())
+    if (!("error" in flags)) return flags
+    if (!this.echoErrorLogged) {
+      this.echoErrorLogged = true
+      console.warn(
+        `[pty-daemon] session ${this.id}: cannot read the ECHO and ICANON flags (${flags.error}); taken as a hidden prompt (no predictions)`,
+      )
+    }
+    return UNREADABLE_FLAGS
+  }
+
+  private setEcho(flags: InputFlags, offset: number): void {
+    this.echoFlag = flags
+    for (const listener of this.listeners) listener.onEcho(flags, offset)
+  }
+
+  /**
+   * Register a listener. If the session has
    * already exited, the caller is notified synchronously so a late attach still
    * observes the exit. Returns an unsubscribe function.
    */
@@ -125,14 +304,87 @@ class Session {
     }
   }
 
-  write(data: string): void {
-    if (this.alive) this.pty.write(data)
+  /**
+   * Write a typed key at most once. A duplicate sequence number is not written
+   * again. A first send is written. A resend (after a lost reply, or a key
+   * typed while disconnected) is written only if no output appeared after the
+   * point it was typed at; output before the echo ack of this client's
+   * previous written key does not count (it may be that key's own echo).
+   */
+  writeKey(data: string, key: KeyInput): KeyStatus {
+    const typist = this.typists.get(key.clientId) ?? {
+      lastSeq: -1,
+      lastAckOffset: 0,
+      dropping: false,
+    }
+    if (key.seq <= typist.lastSeq) return "duplicate"
+    if (key.firstSend) typist.dropping = false
+    else {
+      const ownEcho = typist.lastAckOffset ?? this.tail.end
+      const unchanged =
+        key.typedAt !== null &&
+        key.typedAt.generation === this.generation &&
+        this.tail.end <= Math.max(key.typedAt.offset, ownEcho)
+      if (typist.dropping || !unchanged) {
+        typist.dropping = true
+        this.remember(key.clientId, typist)
+        return "dropped"
+      }
+    }
+    typist.lastSeq = key.seq
+    typist.lastAckOffset = null
+    this.remember(key.clientId, typist)
+    this.write(data, key)
+    return "applied"
+  }
+
+  private remember(clientId: string, typist: Typist): void {
+    this.typists.delete(clientId)
+    this.typists.set(clientId, typist)
+    while (this.typists.size > TYPIST_LIMIT) {
+      const oldest = this.typists.keys().next().value
+      if (oldest === undefined) break
+      this.typists.delete(oldest)
+    }
+  }
+
+  /** Write a compose-line message and Enter; see `WriteRequest.message`. */
+  writeMessage(text: string): void {
+    const wrapped = this.screen.bracketedPaste() ? `\x1b[200~${text}\x1b[201~` : text
+    this.write(`${wrapped}\r`, null)
+  }
+
+  /** Write to the PTY; a typed key (`key` set) gets an echo ack. */
+  write(data: string, key: KeyInput | null): void {
+    if (!this.alive) return
+    // A program may turn echo off without printing anything (read -s).
+    const flags = this.readEcho()
+    if (!sameFlags(flags, this.echoFlag)) this.setEcho(flags, this.tail.end)
+    this.pty.write(data)
+    if (key === null) return
+    setTimeout(() => {
+      if (this.disposed) return
+      const now = this.readEcho()
+      if (!sameFlags(now, this.echoFlag)) this.setEcho(now, this.tail.end)
+      const typist = this.typists.get(key.clientId)
+      if (typist !== undefined && typist.lastSeq === key.seq) typist.lastAckOffset = this.tail.end
+      for (const listener of this.listeners) listener.onEchoAck(key, this.tail.end, this.echoFlag)
+    }, ECHO_ACK_DELAY_MS).unref()
   }
 
   resize(cols: number, rows: number): void {
+    const changed = cols !== this.cols || rows !== this.rows
     this.cols = cols
     this.rows = rows
     if (this.alive) this.pty.resize(cols, rows)
+    if (!changed) return
+    this.revision += 1
+    this.revisionOffset = this.tail.end
+    this.screen.resize(cols, rows)
+    // A client that applied less output resizes a different screen, so its history may differ.
+    this.screen.historyStableFrom = Math.max(this.screen.historyStableFrom, this.tail.end)
+    for (const listener of this.listeners)
+      listener.onResize(cols, rows, this.revision, this.revisionOffset)
   }
 
   kill(signal?: string): void {
@@ -154,19 +406,26 @@ class Session {
     }
   }
 
-  /** Drop all listeners; used during store teardown. */
-  clearListeners(): void {
+  /** Drop all listeners and the emulator; used when the session is reaped. */
+  dispose(): void {
+    this.disposed = true
     this.listeners.clear()
+    this.screen.dispose()
   }
 }
 
 /** A handle the server uses to drive one session without touching internals. */
 export interface SessionHandle {
   readonly id: string
+  readonly generation: string
+  readonly screenRevision: number
+  readonly echo: InputFlags
   info(): SessionInfo
-  getScrollback(): string
+  startFrom(resume: ResumePoint | null, preferReplay: boolean): SessionStart
   subscribe(listener: SessionListener): () => void
-  write(data: string): void
+  write(data: string, key: KeyInput | null): void
+  writeKey(data: string, key: KeyInput): KeyStatus
+  writeMessage(text: string): void
   resize(cols: number, rows: number): void
   kill(signal?: string): void
 }
@@ -179,6 +438,8 @@ export interface SessionStoreOptions {
 
 /** Owns every live session and reaps each one shortly after its PTY exits. */
 export class SessionStore {
+  /** New for every daemon process, so a resume point from another daemon never replays. */
+  readonly generation = randomUUID()
   private readonly sessions = new Map<string, Session>()
   private readonly scrollbackBytes: number
   private readonly onSessionReaped?: (sessionId: string) => void
@@ -189,18 +450,21 @@ export class SessionStore {
   }
 
   spawn(options: SpawnOptions): SessionHandle {
-    const session = new Session(options, this.scrollbackBytes)
+    const session = new Session(options, this.scrollbackBytes, this.generation)
     this.sessions.set(session.id, session)
     // Reap from the map once the PTY exits, but only after a short grace period
     // so a client attaching right after exit still finds the session and its
     // final scrollback. Listeners always receive the exit event regardless.
     session.subscribe({
       onData: () => {},
+      onResize: () => {},
+      onEcho: () => {},
+      onEchoAck: () => {},
       onExit: () => {
         setTimeout(() => {
           if (this.sessions.get(session.id) === session) {
             this.sessions.delete(session.id)
-            session.clearListeners()
+            session.dispose()
             this.onSessionReaped?.(session.id)
           }
         }, 5_000).unref?.()
@@ -221,7 +485,7 @@ export class SessionStore {
   shutdown(): void {
     for (const session of this.sessions.values()) {
       session.kill("SIGKILL")
-      session.clearListeners()
+      session.dispose()
     }
     this.sessions.clear()
   }

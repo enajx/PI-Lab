@@ -19,6 +19,7 @@ export function TerminalSeam({
           inputKind={termSpawn.inputKind}
           command={termSpawn.command}
           args={termSpawn.args}
+          visible
         />
       </section>
     </div>

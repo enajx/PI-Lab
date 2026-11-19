@@ -2,13 +2,13 @@
 // is exercised by the app/verify harness). We cover the pure spawn plan, the
 // liveness probe, and the *adopt* branch against an in-process DaemonServer.
 
-import { spawn, spawnSync } from "node:child_process"
+import { execFileSync, spawn, spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DaemonServer } from "@pi-lab/pty-daemon"
+import { DaemonServer, PROTOCOL_VERSION } from "@pi-lab/pty-daemon"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import {
   daemonPidsFromProcessList,
@@ -111,14 +111,13 @@ describe("adopt branch", () => {
     expect(monitorClient).not.toBe(rendererClient)
 
     const session = await rendererClient.spawn({ command: "/bin/cat", args: [] })
-    await monitorClient.attach(session.id)
+    await monitorClient.attach(session.id, null)
     await rendererClient.detach(session.id)
 
     const observed = new Promise<string>((resolve) => {
       monitorClient.on("data", (event) => {
-        if (event.sessionId === session.id && event.chunk.includes("monitor-alive")) {
-          resolve(event.chunk)
-        }
+        const text = event.bytes.toString()
+        if (event.sessionId === session.id && text.includes("monitor-alive")) resolve(text)
       })
     })
     await rendererClient.write(session.id, "monitor-alive\n")
@@ -222,6 +221,26 @@ describe("explicit Quit", () => {
     }
   })
 
+  test("a daemon that never answers list leaves no open sockets after repeated connect attempts", async () => {
+    // Accepts connections and reads requests, never answers.
+    const silent = createServer((socket) => socket.resume())
+    await new Promise<void>((resolve) => silent.listen(socketPath, resolve))
+    try {
+      supervisor = new TerminalSupervisor({ socketPath, spawnTimeoutMs: 100 })
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await expect(supervisor.ensureClient()).rejects.toThrow(/did not answer/)
+      }
+      await vi.waitFor(async () => {
+        const open = await new Promise<number>((resolve, reject) =>
+          silent.getConnections((error, count) => (error ? reject(error) : resolve(count))),
+        )
+        expect(open).toBe(0)
+      })
+    } finally {
+      await new Promise((resolve) => silent.close(resolve))
+    }
+  })
+
   test("shutdownDaemon stops a daemon it is still starting", async () => {
     // A daemon that starts listening only after Quit has begun.
     const entry = join(socketDir, "slow-daemon.js")
@@ -253,7 +272,7 @@ describe("explicit Quit", () => {
     await mkdir(join(socketDir, "old app", "pty-daemon"), { recursive: true })
     await writeFile(
       entry,
-      "process.on('SIGTERM', () => {});require('node:net').createServer((s) => s.resume()).listen(process.argv[2])",
+      `process.on('SIGTERM', () => {});require('node:net').createServer((s) => s.on('data', (d) => { const f = JSON.parse(d.toString()); if (f.kind === 'list') s.write(JSON.stringify({ kind: 'list-ok', cid: f.cid, sessions: [], protocol: ${PROTOCOL_VERSION} }) + '\\n') })).listen(process.argv[2])`,
     )
     const old = spawn(process.execPath, [entry, socketPath], { stdio: "ignore" })
     const exited = new Promise((resolve) => old.once("exit", resolve))
@@ -298,13 +317,138 @@ describe("daemonPidsFromProcessList", () => {
   })
 })
 
+describe("adopting a daemon by protocol", () => {
+  /** A stand-in for a version 1 daemon: answers list without a protocol field, and shutdown by closing. */
+  async function startFakeV1Daemon(): Promise<{ requests: string[]; close: () => Promise<void> }> {
+    const requests: string[] = []
+    const sockets = new Set<import("node:net").Socket>()
+    const fake = createServer((socket) => {
+      sockets.add(socket)
+      let buffer = ""
+      socket.on("data", (chunk) => {
+        buffer += chunk.toString()
+        for (let at = buffer.indexOf("\n"); at !== -1; at = buffer.indexOf("\n")) {
+          const frame = JSON.parse(buffer.slice(0, at)) as { kind: string; cid: string }
+          buffer = buffer.slice(at + 1)
+          requests.push(frame.kind)
+          if (frame.kind === "list") {
+            socket.write(`${JSON.stringify({ kind: "list-ok", cid: frame.cid, sessions: [] })}\n`)
+          } else if (frame.kind === "shutdown") {
+            socket.write(
+              `${JSON.stringify({ kind: "shutdown-ok", cid: frame.cid, pid: process.pid })}\n`,
+            )
+            fake.close()
+            for (const open of sockets) open.end()
+          }
+        }
+      })
+      socket.on("error", () => {})
+    })
+    await new Promise<void>((resolve) => fake.listen(socketPath, resolve))
+    return {
+      requests,
+      close: async () => {
+        for (const open of sockets) open.destroy()
+        if (fake.listening) await new Promise((resolve) => fake.close(resolve))
+      },
+    }
+  }
+
+  /** Bundle the current daemon source (the built out/ bundle can be stale) next to node_modules. */
+  async function buildDaemonEntry(): Promise<string> {
+    const desktopDir = join(__dirname, "..", "..", "..")
+    const dir = await mkdtemp(join(desktopDir, "node_modules", ".test-daemon-"))
+    const entry = join(dir, "index.js")
+    execFileSync("bun", [
+      "build",
+      join(desktopDir, "src", "main", "terminal", "daemonEntry.ts"),
+      "--target=node",
+      "--format=esm",
+      "--external=node-pty",
+      "--external=@xterm/headless",
+      "--external=@pi-lab/pty-termios",
+      `--outfile=${entry}`,
+    ])
+    await writeFile(join(dir, "package.json"), '{"type":"module"}')
+    return entry
+  }
+
+  test("an adopted version 1 daemon is shut down and replaced by a current one", async () => {
+    const entry = await buildDaemonEntry()
+    const fake = await startFakeV1Daemon()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      supervisor = new TerminalSupervisor({ socketPath, daemonEntry: entry })
+      const client = await supervisor.ensureClient()
+      expect(fake.requests).toContain("shutdown")
+      expect(await client.protocolVersion()).toBe(PROTOCOL_VERSION)
+      const session = await client.spawn({ command: "/bin/cat", args: [] })
+      expect(session.id).toBeTruthy()
+      expect(warn.mock.calls[0]?.[0]).toMatch(
+        new RegExp(`protocol 1.*protocol ${PROTOCOL_VERSION}`, "s"),
+      )
+      await supervisor.shutdownDaemon(2_000, vi.fn())
+    } finally {
+      warn.mockRestore()
+      await fake.close()
+      await rm(join(entry, ".."), { recursive: true, force: true })
+    }
+  })
+
+  test("an adopted old daemon that ignores shutdown is stopped by pid and replaced", async () => {
+    // Stands in for a version 1 daemon from an earlier build: answers list without a
+    // protocol field and ignores shutdown, so only its pid can stop it.
+    const entry = await buildDaemonEntry()
+    const oldEntry = join(socketDir, "old app", "pty-daemon", "index.js")
+    await mkdir(join(socketDir, "old app", "pty-daemon"), { recursive: true })
+    await writeFile(
+      oldEntry,
+      `require('node:net').createServer((s) => s.on('data', (d) => { for (const line of d.toString().split('\\n').filter(Boolean)) { const f = JSON.parse(line); if (f.kind === 'list') s.write(JSON.stringify({ kind: 'list-ok', cid: f.cid, sessions: [] }) + '\\n') } })).listen(process.argv[2])`,
+    )
+    const old = spawn(process.execPath, [oldEntry, socketPath], { stdio: "ignore" })
+    const exited = new Promise((resolve) => old.once("exit", resolve))
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const deadline = Date.now() + 5_000
+      while (!(await isDaemonListening(socketPath))) {
+        if (Date.now() > deadline) throw new Error("fake daemon did not listen")
+        await new Promise((done) => setTimeout(done, 20))
+      }
+      // The default spawn wait (60 s, for a slow start) must not delay the replacement.
+      supervisor = new TerminalSupervisor({ socketPath, daemonEntry: entry })
+      const client = await supervisor.ensureClient()
+      await exited
+      expect(old.signalCode).toBe("SIGTERM")
+      expect(await client.protocolVersion()).toBe(PROTOCOL_VERSION)
+      expect(warn.mock.calls.map((call) => String(call[0])).join("\n")).toContain(`pid ${old.pid}`)
+      await supervisor.shutdownDaemon(2_000, vi.fn())
+    } finally {
+      warn.mockRestore()
+      old.kill("SIGKILL")
+      await rm(join(entry, ".."), { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  test("an adopted current daemon is kept", async () => {
+    server = new DaemonServer({ socketPath })
+    await server.listen()
+    const shutdown = vi.spyOn(server, "close")
+    supervisor = new TerminalSupervisor({ socketPath, daemonEntry: join(socketDir, "missing.js") })
+    const client = await supervisor.ensureClient()
+    expect(await client.protocolVersion()).toBe(PROTOCOL_VERSION)
+    expect(shutdown).not.toHaveBeenCalled()
+    expect(await isDaemonListening(socketPath)).toBe(true)
+  })
+})
+
 describe("slow daemon start", () => {
   test("a daemon child that is alive but slow to listen is waited for past 5 s", async () => {
     // Listens after 6 s, as on a fully loaded machine.
     const entry = join(socketDir, "slow-start-daemon.js")
     await writeFile(
       entry,
-      `setTimeout(() => require('node:net').createServer((s) => s.resume()).listen(process.argv[2]), 6_000)`,
+      // Answers the protocol check like a current daemon once it listens.
+      `setTimeout(() => require('node:net').createServer((s) => { let b = ''; s.on('data', (d) => { b += d; let i; while ((i = b.indexOf('\\n')) >= 0) { const m = JSON.parse(b.slice(0, i)); b = b.slice(i + 1); if (m.kind === 'list') s.write(JSON.stringify({ kind: 'list-ok', cid: m.cid, sessions: [], protocol: ${PROTOCOL_VERSION} }) + '\\n') } }) }).listen(process.argv[2]), 6_000)`,
     )
     supervisor = new TerminalSupervisor({
       socketPath,

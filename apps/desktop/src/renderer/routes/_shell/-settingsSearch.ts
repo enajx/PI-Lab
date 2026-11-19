@@ -10,6 +10,7 @@ const SETTINGS_SECTION_IDS = [
   "document-tools",
   "quick-editor",
   "agents",
+  "terminal",
   "notifications",
   "caffeine",
   "project-template",

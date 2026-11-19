@@ -1,0 +1,21 @@
+{
+  "name": "pi-lab-expo-check",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "dependencies": {
+    "@trpc/client": "11.18.0",
+    "@trpc/server": "11.18.0",
+    "expo": "~58.0.26",
+    "expo-status-bar": "~58.0.5",
+    "react": "19.3.0",
+    "react-native": "0.88.1"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "check": "node run-check.mjs"
+  },
+  "private": true
+}

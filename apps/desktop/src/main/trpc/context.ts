@@ -32,6 +32,7 @@ import { liveSetupProbe, type SetupProbe } from "../setup/probe"
 import type { ThumbnailImageProcessor } from "./projects/thumbnailImage"
 import type { AnalysisInteractivePort } from "./science/analysis/interactive"
 import type { AnalysisPreviewPort } from "./science/analysis/previewWorker"
+import type { ConnectionFlow } from "./terminal/outputFlow"
 
 /**
  * Dependencies for the main-process router are injected so callers can run
@@ -89,6 +90,24 @@ export interface AppContext {
   thumbnailImageProcessor: ThumbnailImageProcessor
   /** Server process services; absent in router tests that do not need them. */
   server?: ServerControlPort
+  /**
+   * The client connection this call came over: present for WebSocket clients,
+   * absent for in-process callers. Terminal output stops when its send queue
+   * passes a limit (see `terminal.output`).
+   */
+  connection?: ClientConnection
+}
+
+/** One client's WebSocket, as the routers see it. */
+export interface ClientConnection {
+  /** The device whose token opened this WebSocket (see server/devices.ts). */
+  deviceId: string
+  /** Bytes queued to send to this client and not yet written to the network. */
+  queuedBytes: () => number
+  /** The server stopped terminal output to this client because its queue was over the limit. */
+  sentBehind: () => void
+  /** Terminal output flow control for this connection (one per WebSocket). */
+  outputFlow: ConnectionFlow
 }
 
 /**

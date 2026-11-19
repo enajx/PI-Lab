@@ -215,7 +215,7 @@ describe("normal close with existing editor writes and mocked shutdown IPC", () 
       },
     }
     const ensureMain = vi.fn(() => ({ id: "main-workspace" }))
-    const write = vi.fn(() => ({ matchesWrittenContent: true }))
+    const write = vi.fn(() => ({ status: "saved", matchesWrittenContent: true }))
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <AppProviders
@@ -241,6 +241,7 @@ describe("normal close with existing editor writes and mocked shutdown IPC", () 
       workspaceId: "main-workspace",
       relPath: "notes/draft.py",
       content: "project draft",
+      expected: null,
     })
     expect(readUntitledDraft()).toBe("")
     queryClient.clear()

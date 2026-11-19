@@ -29,7 +29,7 @@ export function QuickPythonTerminal({
         </button>
       </div>
       <div className="min-h-0 flex-1">
-        <Terminal key={sessionId} inputKind="terminal" sessionId={sessionId} />
+        <Terminal key={sessionId} inputKind="terminal" sessionId={sessionId} visible />
       </div>
     </section>
   )

@@ -40,6 +40,7 @@ function setup(handlers: FakeHandlers, buffer: OpenBuffer, formatOnSave: boolean
     "files.write": async (input) => {
       const result = (await write(input)) as Record<string, unknown>
       return {
+        status: "saved",
         ...result,
         baseline: result.baseline ?? (await stat(input)),
         matchesWrittenContent: result.matchesWrittenContent ?? true,
@@ -154,6 +155,7 @@ describe("editor races (deferred mocked IPC)", () => {
         workspaceId: "retained-save",
         relPath: "notes.txt",
         content: "newer draft",
+        expected: expect.objectContaining({ size: expect.any(Number) }),
       })
       second.unmount()
     }
@@ -510,7 +512,7 @@ test.each([
     externalChange: true,
   })
   const path = kind === "save" ? "notes.txt" : "new.txt"
-  expect(view.result.current.tabs).toEqual([{ relPath: path, dirty: true }])
+  expect(view.result.current.tabs).toEqual([{ relPath: path, dirty: true, notSaved: false }])
   act(() => view.result.current.onEdit(path, "local second"))
   await act(async () => {
     await view.result.current.saveFile(path)
@@ -800,4 +802,48 @@ test("an open file without focus picks up changes on disk (mocked IPC)", async (
     view.result.current.buffers.find((buffer) => buffer.relPath === "other.txt"),
   ).toMatchObject({ content: "disk", savedContent: "disk" })
   expect(view.result.current.active?.relPath).toBe("notes.txt")
+})
+
+test("a save the server refuses as a conflict keeps the text and shows the conflict (mocked IPC)", async () => {
+  const write = vi.fn(() => ({
+    status: "conflict",
+    baseline: { exists: true, mtimeMs: 9, size: 9 },
+  }))
+  const view = setup({ "files.write": write }, initial, false)
+  act(() => view.result.current.onEdit("notes.txt", "my text"))
+  let saved: boolean | undefined
+  await act(async () => {
+    saved = await view.result.current.saveFile("notes.txt")
+  })
+  expect(saved).toBe(false)
+  expect(write).toHaveBeenCalledWith(expect.objectContaining({ expected: { mtimeMs: 1, size: 3 } }))
+  expect(view.result.current.active).toMatchObject({
+    content: "my text",
+    savedContent: "old",
+    externalChange: true,
+  })
+})
+
+test("a save with no reply from the server marks the tab not saved and keeps the text (mocked IPC)", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  const reply = deferred<Record<string, unknown>>()
+  const view = setup({ "files.write": () => reply.promise }, initial, false)
+  act(() => view.result.current.onEdit("notes.txt", "offline text"))
+  let saving: Promise<boolean> | undefined
+  act(() => {
+    saving = view.result.current.saveFile("notes.txt")
+  })
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(6_000)
+  })
+  expect(view.result.current.tabs).toEqual([{ relPath: "notes.txt", dirty: true, notSaved: true }])
+  expect(view.result.current.active?.content).toBe("offline text")
+  // The server answers later: the save completes and the mark clears.
+  await act(async () => {
+    reply.resolve({})
+    await saving
+  })
+  expect(view.result.current.tabs).toEqual([
+    { relPath: "notes.txt", dirty: false, notSaved: false },
+  ])
 })

@@ -110,7 +110,13 @@ export class DesktopRuntime {
   /** The renderer's server address and token (asked over IPC by the preload). */
   async rendererEndpoint(): Promise<{ url: string }> {
     await this.ready
-    return { url: serverSocketUrl(await this.currentEndpoint()) }
+    const endpoint = await this.currentEndpoint()
+    // Test seam (typing tests): the renderer's sockets go through a latency
+    // proxy on this port, which forwards to the port in server.json.
+    const proxyPort = isTestMode ? process.env.PI_LAB_TEST_RENDERER_PROXY_PORT : undefined
+    return {
+      url: serverSocketUrl(proxyPort ? { ...endpoint, port: Number(proxyPort) } : endpoint),
+    }
   }
 
   /**

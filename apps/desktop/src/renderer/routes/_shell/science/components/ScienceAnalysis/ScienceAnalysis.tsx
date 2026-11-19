@@ -50,6 +50,7 @@ import {
 import { QuickFind, type QuickFindItem } from "../../../../../QuickFind"
 import { KEEPS_ESCAPE, OPEN_OVERLAY } from "../../../../../shortcuts/keyGuards"
 import { eventMatchesShortcut } from "../../../../../shortcuts/shortcuts"
+import { withLaunchId } from "../../../../../trpc/launch"
 import { useTRPC } from "../../../../../trpc/react"
 import { useReportViewProject } from "../../../components/StatusBar/viewProjectStore"
 import { CentralTab } from "../../../projects/components/CentralPanel/CentralPanel"
@@ -240,37 +241,41 @@ export function ScienceAnalysis({
   // opens a terminal agent by default. When it is set to "Terminal", the project's
   // agent still starts, since a skill needs an agent to run it.
   const analyzeExperiments = useMutation(
-    trpc.sessions.startAnalyzeExperiments.mutationOptions({
-      onSuccess: (result, input) =>
-        setSessionRequest({
-          projectId: input.projectId,
-          pane: {
-            kind: "agent",
-            sessionId: result.sessionId,
-            label: t("Analyze experiments"),
-            wsKind: result.kind,
-            launch: { type: "agent", agentId: result.agentId, workspaceMode: "policy" },
-          },
-        }),
-      onError: (cause) => setShortcutError(cause.message),
-    }),
+    withLaunchId(
+      trpc.sessions.startAnalyzeExperiments.mutationOptions({
+        onSuccess: (result, input) =>
+          setSessionRequest({
+            projectId: input.projectId,
+            pane: {
+              kind: "agent",
+              sessionId: result.sessionId,
+              label: t("Analyze experiments"),
+              wsKind: result.kind,
+              launch: { type: "agent", agentId: result.agentId, workspaceMode: "policy" },
+            },
+          }),
+        onError: (cause) => setShortcutError(cause.message),
+      }),
+    ),
   )
   // Report starts the project's agent with the report skill named in Settings.
   const report = useMutation(
-    trpc.sessions.startReport.mutationOptions({
-      onSuccess: (result, input) =>
-        setSessionRequest({
-          projectId: input.projectId,
-          pane: {
-            kind: "agent",
-            sessionId: result.sessionId,
-            label: t("Report"),
-            wsKind: result.kind,
-            launch: { type: "agent", agentId: result.agentId, workspaceMode: "policy" },
-          },
-        }),
-      onError: (cause) => setShortcutError(cause.message),
-    }),
+    withLaunchId(
+      trpc.sessions.startReport.mutationOptions({
+        onSuccess: (result, input) =>
+          setSessionRequest({
+            projectId: input.projectId,
+            pane: {
+              kind: "agent",
+              sessionId: result.sessionId,
+              label: t("Report"),
+              wsKind: result.kind,
+              launch: { type: "agent", agentId: result.agentId, workspaceMode: "policy" },
+            },
+          }),
+        onError: (cause) => setShortcutError(cause.message),
+      }),
+    ),
   )
   // The default results folder from Settings; an empty field means the built-in default.
   const [defaultResultsFolderSetting] = useDefaultResultsFolder()

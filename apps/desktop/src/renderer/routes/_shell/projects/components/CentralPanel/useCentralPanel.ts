@@ -13,6 +13,7 @@ import {
 import type { RetainedBuffers } from "../../../../../Editor/hooks/useEditorBuffers/useEditorBuffers"
 import { resolveLaunchAgentId, useDefaultAgentId } from "../../../../../preferences/preferences"
 import type { PiLabTrpcClient } from "../../../../../trpc/client"
+import { startOnce, withLaunchId } from "../../../../../trpc/launch"
 import { useTRPC } from "../../../../../trpc/react"
 import { useLatexBuild } from "./useLatexBuild"
 import { type NotebookPane, useNotebookTabs } from "./useNotebookTabs"
@@ -261,7 +262,7 @@ export function useCentralPanel({
     }
   }, [workspaceId, initialState, editor.openFile, editor.setActiveRelPath])
 
-  const startSession = useMutation(trpc.sessions.start.mutationOptions())
+  const startSession = useMutation(withLaunchId(trpc.sessions.start.mutationOptions()))
   const agentsQuery = useQuery(trpc.agents.list.queryOptions(undefined, { staleTime: 0 }))
   const projectChoiceQuery = useQuery(
     trpc.agents.projectChoice.queryOptions({ projectId }, { staleTime: 0 }),
@@ -327,16 +328,16 @@ export function useCentralPanel({
             return { ...pane, sessionId: result.sessionId }
           }
           if (pane.launch.type === "auto-research") {
-            const result = await client.sessions.startAutoResearch.mutate({ projectId })
+            const result = await startOnce((launchId) =>
+              client.sessions.startAutoResearch.mutate({ projectId, launchId }),
+            )
             createdSessionIds.add(result.sessionId)
             return { ...pane, sessionId: result.sessionId, wsKind: result.kind }
           }
-          const result = await client.sessions.start.mutate({
-            projectId,
-            origin,
-            agentId: pane.launch.agentId,
-            workspaceMode: pane.launch.workspaceMode,
-          })
+          const { agentId, workspaceMode } = pane.launch
+          const result = await startOnce((launchId) =>
+            client.sessions.start.mutate({ projectId, origin, agentId, workspaceMode, launchId }),
+          )
           createdSessionIds.add(result.sessionId)
           if (result.warning && isCurrent()) setLaunchWarning(result.warning)
           return { ...pane, sessionId: result.sessionId, wsKind: result.kind }

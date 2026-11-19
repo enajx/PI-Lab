@@ -161,7 +161,14 @@ describe("Tasks top bar shortcuts", () => {
     fireEvent.click(button)
 
     await waitFor(() =>
-      expect(started).toEqual([{ projectId: "p1", skillSlug: "review-notes", origin: "tasks" }]),
+      expect(started).toEqual([
+        {
+          projectId: "p1",
+          skillSlug: "review-notes",
+          origin: "tasks",
+          launchId: expect.any(String),
+        },
+      ]),
     )
     const panel = screen.getByTestId("science-sessions")
     expect((await within(panel).findByTestId("terminal")).getAttribute("data-session-id")).toBe(
@@ -205,7 +212,9 @@ describe("Analysis top bar shortcuts", () => {
 
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
     fireEvent.click(button)
-    await waitFor(() => expect(started).toEqual([{ projectId: "p1" }]))
+    await waitFor(() =>
+      expect(started).toEqual([{ projectId: "p1", launchId: expect.any(String) }]),
+    )
     const panel = screen.getByTestId("science-sessions")
     expect((await within(panel).findByTestId("terminal")).getAttribute("data-session-id")).toBe(
       "analyze-1",
@@ -293,7 +302,9 @@ describe("Analysis top bar shortcuts", () => {
     expect(button.getAttribute("title")).toBe("Report")
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false))
     fireEvent.click(button)
-    await waitFor(() => expect(started).toEqual([{ projectId: "p1" }]))
+    await waitFor(() =>
+      expect(started).toEqual([{ projectId: "p1", launchId: expect.any(String) }]),
+    )
     const panel = screen.getByTestId("science-sessions")
     // The shared workspace recovery store still holds the previous test's "analyze-1" tab
     // for p1; the panel drops it once terminal.list shows it is gone, so wait for report-1.

@@ -5,7 +5,6 @@ import { initTRPC } from "@trpc/server"
 import { applyWSSHandler } from "@trpc/server/adapters/ws"
 import { observable } from "@trpc/server/observable"
 import type { TRPCResponseMessage } from "@trpc/server/rpc"
-import superjson from "superjson"
 import { afterAll, beforeAll, expect, test, vi } from "vitest"
 import { WebSocketServer } from "ws"
 import { z } from "zod"
@@ -46,7 +45,7 @@ function installedHandler(): typeof import("trpc-electron/main") {
   }
 }
 
-const t = initTRPC.create({ transformer: superjson })
+const t = initTRPC.create()
 const emitters = new Set<(chunk: string) => void>()
 const serverRouter = t.router({
   terminal: t.router({

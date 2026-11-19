@@ -66,7 +66,8 @@ async function main(): Promise<void> {
   const serverId = newServerId()
   const server = await listen({
     port: config.port,
-    token,
+    access: runtime.devices,
+    localToken: token,
     createContext: () => ({
       ...runtime.createAppContext(),
       server: { runtime, exit: () => setImmediate(() => stop(0)) },
@@ -76,6 +77,7 @@ async function main(): Promise<void> {
       if (scheme === MEDIA_SCHEME) return analysisMedia.handle(request)
       return Promise.resolve(new Response(null, { status: 404 }))
     },
+    testRoutes: process.env.PI_LAB_TEST_MODE === "1",
   })
   writeStartStep(config.dataDir, "listening")
   writeDiscovery(config.dataDir, {

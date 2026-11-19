@@ -13,6 +13,15 @@ import { describeSchedule, isValidRrule, nextOccurrence, upcomingOccurrences } f
 import { TRPCError } from "@trpc/server"
 import { and, desc, eq } from "drizzle-orm"
 import { z } from "zod"
+import {
+  automationDetailSchema,
+  automationListItemSchema,
+  automationPromptVersionSchema,
+  automationRunNowSchema,
+  automationRunSchema,
+  okSchema,
+  schedulePreviewSchema,
+} from "../../../shared/clientApi"
 import { dispatchAutomation } from "../../automations/dispatch"
 import { publicProcedure, router } from "../trpc"
 
@@ -148,104 +157,113 @@ const previewInput = z.object({
 
 export const automationsRouter = router({
   /** All automations, newest first, with their cadence summary. */
-  list: publicProcedure.query(({ ctx }): AutomationListItem[] =>
-    ctx.db.select().from(automations).orderBy(desc(automations.createdAt)).all().map(toListItem),
-  ),
+  list: publicProcedure
+    .output(z.array(automationListItemSchema))
+    .query(({ ctx }): AutomationListItem[] =>
+      ctx.db.select().from(automations).orderBy(desc(automations.createdAt)).all().map(toListItem),
+    ),
 
   /** One automation's full detail (incl. its current prompt + anchor). */
   get: publicProcedure
     .input(idInput)
+    .output(automationDetailSchema)
     .query(({ ctx, input }): AutomationDetail => toDetail(readAutomation(ctx.db, input.id))),
 
   /**
    * Create an automation: validate the RRULE, compute the initial `nextRunAt`
    * (when enabled), insert, and snapshot the prompt as the first version.
    */
-  create: publicProcedure.input(createInput).mutation(({ ctx, input }): AutomationDetail => {
-    if (!isValidRrule(input.recurrenceRule)) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid recurrence rule" })
-    }
-    const project = ctx.db.select().from(projects).where(eq(projects.id, input.projectId)).get()
-    if (!project) {
-      throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
-    }
+  create: publicProcedure
+    .input(createInput)
+    .output(automationDetailSchema)
+    .mutation(({ ctx, input }): AutomationDetail => {
+      if (!isValidRrule(input.recurrenceRule)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid recurrence rule" })
+      }
+      const project = ctx.db.select().from(projects).where(eq(projects.id, input.projectId)).get()
+      if (!project) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `No project ${input.projectId}` })
+      }
 
-    const now = Date.now()
-    const startAt = input.startAt ?? now
-    const enabled = input.enabled ?? true
-    const nextRunAt = enabled
-      ? computeNextRunAt(input.recurrenceRule, startAt, input.timezone, now)
-      : null
+      const now = Date.now()
+      const startAt = input.startAt ?? now
+      const enabled = input.enabled ?? true
+      const nextRunAt = enabled
+        ? computeNextRunAt(input.recurrenceRule, startAt, input.timezone, now)
+        : null
 
-    const inserted = ctx.db
-      .insert(automations)
-      .values({
-        projectId: input.projectId,
-        agentId: input.agentId,
-        executionMode: input.executionMode,
-        name: input.name,
-        prompt: input.prompt,
-        recurrenceRule: input.recurrenceRule,
-        startAt,
-        timezone: input.timezone,
-        enabled,
-        nextRunAt,
-      })
-      .returning()
-      .get()
+      const inserted = ctx.db
+        .insert(automations)
+        .values({
+          projectId: input.projectId,
+          agentId: input.agentId,
+          executionMode: input.executionMode,
+          name: input.name,
+          prompt: input.prompt,
+          recurrenceRule: input.recurrenceRule,
+          startAt,
+          timezone: input.timezone,
+          enabled,
+          nextRunAt,
+        })
+        .returning()
+        .get()
 
-    snapshotPrompt(ctx.db, inserted.id, inserted.prompt, "edit")
-    return toDetail(inserted)
-  }),
+      snapshotPrompt(ctx.db, inserted.id, inserted.prompt, "edit")
+      return toDetail(inserted)
+    }),
 
   /**
    * Update an automation. Re-snapshots the prompt when it changes; recomputes
    * `nextRunAt` from now when any recurrence field (rule / anchor / timezone)
    * changes and the automation is enabled.
    */
-  update: publicProcedure.input(updateInput).mutation(({ ctx, input }): AutomationDetail => {
-    const current = readAutomation(ctx.db, input.id)
+  update: publicProcedure
+    .input(updateInput)
+    .output(automationDetailSchema)
+    .mutation(({ ctx, input }): AutomationDetail => {
+      const current = readAutomation(ctx.db, input.id)
 
-    const recurrenceRule = input.recurrenceRule?.trim() ?? current.recurrenceRule
-    if (input.recurrenceRule !== undefined && !isValidRrule(recurrenceRule)) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid recurrence rule" })
-    }
-    const startAt = input.startAt ?? current.startAt
-    const timezone = input.timezone ?? current.timezone
+      const recurrenceRule = input.recurrenceRule?.trim() ?? current.recurrenceRule
+      if (input.recurrenceRule !== undefined && !isValidRrule(recurrenceRule)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid recurrence rule" })
+      }
+      const startAt = input.startAt ?? current.startAt
+      const timezone = input.timezone ?? current.timezone
 
-    const recurrenceChanged =
-      recurrenceRule !== current.recurrenceRule ||
-      startAt !== current.startAt ||
-      timezone !== current.timezone
+      const recurrenceChanged =
+        recurrenceRule !== current.recurrenceRule ||
+        startAt !== current.startAt ||
+        timezone !== current.timezone
 
-    const promptChanged = input.prompt !== undefined && input.prompt !== current.prompt
+      const promptChanged = input.prompt !== undefined && input.prompt !== current.prompt
 
-    const nextRunAt =
-      recurrenceChanged && current.enabled
-        ? computeNextRunAt(recurrenceRule, startAt, timezone, Date.now())
-        : current.nextRunAt
+      const nextRunAt =
+        recurrenceChanged && current.enabled
+          ? computeNextRunAt(recurrenceRule, startAt, timezone, Date.now())
+          : current.nextRunAt
 
-    const updated = ctx.db
-      .update(automations)
-      .set({
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
-        ...(input.executionMode !== undefined ? { executionMode: input.executionMode } : {}),
-        ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
-        ...(promptChanged ? { prompt: input.prompt } : {}),
-        recurrenceRule,
-        startAt,
-        timezone,
-        ...(recurrenceChanged ? { nextRunAt } : {}),
-        updatedAt: Date.now(),
-      })
-      .where(eq(automations.id, input.id))
-      .returning()
-      .get()
+      const updated = ctx.db
+        .update(automations)
+        .set({
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+          ...(input.executionMode !== undefined ? { executionMode: input.executionMode } : {}),
+          ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+          ...(promptChanged ? { prompt: input.prompt } : {}),
+          recurrenceRule,
+          startAt,
+          timezone,
+          ...(recurrenceChanged ? { nextRunAt } : {}),
+          updatedAt: Date.now(),
+        })
+        .where(eq(automations.id, input.id))
+        .returning()
+        .get()
 
-    if (promptChanged) snapshotPrompt(ctx.db, input.id, updated.prompt, "edit")
-    return toDetail(updated)
-  }),
+      if (promptChanged) snapshotPrompt(ctx.db, input.id, updated.prompt, "edit")
+      return toDetail(updated)
+    }),
 
   /**
    * Enable / disable. On enable, recompute `nextRunAt` from now so a paused
@@ -253,6 +271,7 @@ export const automationsRouter = router({
    */
   setEnabled: publicProcedure
     .input(z.object({ id: z.string().min(1), enabled: z.boolean() }))
+    .output(automationDetailSchema)
     .mutation(({ ctx, input }): AutomationDetail => {
       const current = readAutomation(ctx.db, input.id)
       const nextRunAt = input.enabled
@@ -268,11 +287,14 @@ export const automationsRouter = router({
     }),
 
   /** Delete an automation (runs + prompt versions cascade via the schema FK). */
-  delete: publicProcedure.input(idInput).mutation(({ ctx, input }): { ok: true } => {
-    readAutomation(ctx.db, input.id)
-    ctx.db.delete(automations).where(eq(automations.id, input.id)).run()
-    return { ok: true }
-  }),
+  delete: publicProcedure
+    .input(idInput)
+    .output(okSchema)
+    .mutation(({ ctx, input }): { ok: true } => {
+      readAutomation(ctx.db, input.id)
+      ctx.db.delete(automations).where(eq(automations.id, input.id)).run()
+      return { ok: true }
+    }),
 
   /**
    * Fire an automation immediately via the same dispatch path the scheduler
@@ -281,6 +303,7 @@ export const automationsRouter = router({
    */
   runNow: publicProcedure
     .input(idInput)
+    .output(automationRunNowSchema)
     .mutation(async ({ ctx, input }): Promise<{ runId: string | null }> => {
       const automation = readAutomation(ctx.db, input.id)
       const run = await dispatchAutomation(ctx, { automation, scheduledFor: Date.now() })
@@ -296,6 +319,7 @@ export const automationsRouter = router({
         targetRunId: z.string().min(1).optional(),
       }),
     )
+    .output(z.array(automationRunSchema))
     .query(({ ctx, input }): AutomationRun[] => {
       const runs = ctx.db
         .select()
@@ -322,6 +346,7 @@ export const automationsRouter = router({
   /** The prompt revision history for an automation, newest first. */
   listPromptVersions: publicProcedure
     .input(z.object({ automationId: z.string().min(1) }))
+    .output(z.array(automationPromptVersionSchema))
     .query(({ ctx, input }): AutomationPromptVersion[] =>
       ctx.db
         .select()
@@ -338,6 +363,7 @@ export const automationsRouter = router({
    */
   previewSchedule: publicProcedure
     .input(previewInput)
+    .output(schedulePreviewSchema)
     .query(({ input }): { valid: boolean; summary: string; upcoming: number[] } => {
       if (!isValidRrule(input.recurrenceRule)) {
         return { valid: false, summary: "Custom", upcoming: [] }

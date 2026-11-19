@@ -35,7 +35,7 @@ export interface ServerDiscovery {
 }
 
 /** Write a file with owner-only permissions, atomically (temp file and rename). */
-function writeOwnerOnly(path: string, content: string): void {
+export function writeOwnerOnly(path: string, content: string): void {
   const temp = `${path}.${process.pid}.tmp`
   writeFileSync(temp, content, { mode: 0o600 })
   chmodSync(temp, 0o600)
@@ -43,7 +43,7 @@ function writeOwnerOnly(path: string, content: string): void {
 }
 
 /** Refuse a file that group or other users can read or write. */
-function assertOwnerOnly(path: string): void {
+export function assertOwnerOnly(path: string): void {
   const mode = statSync(path).mode & 0o777
   if ((mode & 0o077) !== 0) {
     throw new Error(`${path} is readable by other users (mode ${mode.toString(8)}); expected 600`)

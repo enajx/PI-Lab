@@ -797,3 +797,33 @@ export const useNewSessionKind = (): [NewSessionKind, (next: NewSessionKind) => 
   const [stored, setStored] = useStringPref(NEW_SESSION_KIND_KEY, DEFAULT_NEW_SESSION_KIND)
   return [toNewSessionKind(stored), setStored]
 }
+
+// --- Terminal: local echo and the compose line --------------------------------
+/** When local echo predictions show (renderer/Terminal/localEcho.ts). */
+export type LocalEchoPreference = "adaptive" | "always" | "off"
+const LOCAL_ECHO_KEY = "pi-lab.terminal.localEcho"
+const LOCAL_ECHO_MODES = new Set<LocalEchoPreference>(["adaptive", "always", "off"])
+
+function toLocalEcho(raw: string): LocalEchoPreference {
+  return LOCAL_ECHO_MODES.has(raw as LocalEchoPreference)
+    ? (raw as LocalEchoPreference)
+    : "adaptive"
+}
+
+export const useLocalEcho = (): [LocalEchoPreference, (next: LocalEchoPreference) => void] => {
+  const [stored, setStored] = useStringPref(LOCAL_ECHO_KEY, "adaptive")
+  return [toLocalEcho(stored), setStored]
+}
+
+const composeKey = (sessionId: string): string => `pi-lab.terminal.compose.${sessionId}`
+
+/** The user's compose-line choice for one terminal session, or null when never chosen. */
+export function readComposeChoice(sessionId: string): boolean | null {
+  if (typeof window === "undefined") return null
+  const raw = window.localStorage.getItem(composeKey(sessionId))
+  return raw === null ? null : raw === "true"
+}
+
+export function writeComposeChoice(sessionId: string, on: boolean): void {
+  writePref(composeKey(sessionId), String(on))
+}

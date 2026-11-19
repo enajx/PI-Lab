@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useState } from "react"
 import { expect, test, vi } from "vitest"
 import { createFakeTrpcClient } from "../../test/fakeTrpcClient"
+import { connectionStatus } from "../../trpc/connectionStatus"
 import { useTRPC } from "../../trpc/react"
 import { AppProviders } from "./AppProviders"
 
@@ -52,4 +53,28 @@ test("a deterministic query error surfaces after one attempt", async () => {
   )
   await waitFor(() => expect(screen.getByTestId("probe").textContent).toBe("error"))
   expect(ping).toHaveBeenCalledTimes(1)
+})
+
+test("queries refetch when the calls socket opens again after a drop (a restarted server)", async () => {
+  let up = false
+  const ping = vi.fn(() => {
+    if (!up) throw new Error("WebSocket closed")
+    return { echo: "ready" }
+  })
+  const client = createFakeTrpcClient({ "health.ping": ping })
+  connectionStatus.socketCreated("calls")
+  connectionStatus.socketOpened("calls")
+  render(
+    <AppProviders client={client}>
+      <QueryProbe />
+    </AppProviders>,
+  )
+  await waitFor(() => expect(screen.getByTestId("probe").textContent).toBe("error"))
+  up = true
+  act(() => {
+    connectionStatus.socketClosed("calls")
+    connectionStatus.socketOpened("calls")
+  })
+  await waitFor(() => expect(screen.getByTestId("probe").textContent).toBe("ready"))
+  expect(ping).toHaveBeenCalledTimes(2)
 })

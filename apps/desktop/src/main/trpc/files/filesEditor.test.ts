@@ -36,7 +36,12 @@ async function makeWorkspace(): Promise<{ id: string; dir: string }> {
 describe("files.stat", () => {
   test("reports a real file's size and a positive mtime", async () => {
     const ws = await makeWorkspace()
-    await h.caller.files.write({ workspaceId: ws.id, relPath: "main.py", content: "x = 1\n" })
+    await h.caller.files.write({
+      expected: null,
+      workspaceId: ws.id,
+      relPath: "main.py",
+      content: "x = 1\n",
+    })
 
     const stat = await h.caller.files.stat({ workspaceId: ws.id, relPath: "main.py" })
     expect(stat.exists).toBe(true)
@@ -46,7 +51,12 @@ describe("files.stat", () => {
 
   test("changes its fingerprint after an out-of-band edit", async () => {
     const ws = await makeWorkspace()
-    await h.caller.files.write({ workspaceId: ws.id, relPath: "main.py", content: "x = 1\n" })
+    await h.caller.files.write({
+      expected: null,
+      workspaceId: ws.id,
+      relPath: "main.py",
+      content: "x = 1\n",
+    })
     const before = await h.caller.files.stat({ workspaceId: ws.id, relPath: "main.py" })
 
     // Simulate an agent/git edit straight on disk.
@@ -74,9 +84,14 @@ describe("files.stat", () => {
 describe("files.tree", () => {
   test("lists the root with directories first, then files, by name", async () => {
     const ws = await makeWorkspace()
-    await h.caller.files.write({ workspaceId: ws.id, relPath: "src/app.py", content: "" })
-    await h.caller.files.write({ workspaceId: ws.id, relPath: "z.py", content: "" })
-    await h.caller.files.write({ workspaceId: ws.id, relPath: "a.py", content: "" })
+    await h.caller.files.write({
+      expected: null,
+      workspaceId: ws.id,
+      relPath: "src/app.py",
+      content: "",
+    })
+    await h.caller.files.write({ expected: null, workspaceId: ws.id, relPath: "z.py", content: "" })
+    await h.caller.files.write({ expected: null, workspaceId: ws.id, relPath: "a.py", content: "" })
 
     const entries = await h.caller.files.tree({ workspaceId: ws.id, relPath: "" })
     const names = entries.map((e) => e.name)
@@ -92,7 +107,12 @@ describe("files.tree", () => {
 
   test("lists a child directory and returns workspace-relative POSIX paths", async () => {
     const ws = await makeWorkspace()
-    await h.caller.files.write({ workspaceId: ws.id, relPath: "src/lib/util.py", content: "" })
+    await h.caller.files.write({
+      expected: null,
+      workspaceId: ws.id,
+      relPath: "src/lib/util.py",
+      content: "",
+    })
 
     const child = await h.caller.files.tree({ workspaceId: ws.id, relPath: "src" })
     expect(child).toEqual([
@@ -186,9 +206,24 @@ describe("files.createFile / createFolder", () => {
 describe("files.search", () => {
   test("fuzzy-matches file names and returns relative POSIX paths", async () => {
     const ws = await makeWorkspace()
-    await h.caller.files.write({ workspaceId: ws.id, relPath: "src/analysis.py", content: "" })
-    await h.caller.files.write({ workspaceId: ws.id, relPath: "src/plot.py", content: "" })
-    await h.caller.files.write({ workspaceId: ws.id, relPath: "docs/notes.md", content: "" })
+    await h.caller.files.write({
+      expected: null,
+      workspaceId: ws.id,
+      relPath: "src/analysis.py",
+      content: "",
+    })
+    await h.caller.files.write({
+      expected: null,
+      workspaceId: ws.id,
+      relPath: "src/plot.py",
+      content: "",
+    })
+    await h.caller.files.write({
+      expected: null,
+      workspaceId: ws.id,
+      relPath: "docs/notes.md",
+      content: "",
+    })
 
     const result = await h.caller.files.search({ workspaceId: ws.id, query: "analy" })
     const paths = result.hits.map((hit) => hit.relPath)
@@ -200,7 +235,12 @@ describe("files.search", () => {
 
   test("an empty query returns no hits", async () => {
     const ws = await makeWorkspace()
-    await h.caller.files.write({ workspaceId: ws.id, relPath: "main.py", content: "" })
+    await h.caller.files.write({
+      expected: null,
+      workspaceId: ws.id,
+      relPath: "main.py",
+      content: "",
+    })
     const hits = await h.caller.files.search({ workspaceId: ws.id, query: "  " })
     expect(hits).toEqual({ hits: [], partial: false, skipped: [] })
   })
@@ -208,7 +248,12 @@ describe("files.search", () => {
   test("respects the result limit", async () => {
     const ws = await makeWorkspace()
     for (let i = 0; i < 5; i++) {
-      await h.caller.files.write({ workspaceId: ws.id, relPath: `note${i}.py`, content: "" })
+      await h.caller.files.write({
+        expected: null,
+        workspaceId: ws.id,
+        relPath: `note${i}.py`,
+        content: "",
+      })
     }
     const hits = await h.caller.files.search({ workspaceId: ws.id, query: "note", limit: 2 })
     expect(hits.hits.length).toBe(2)

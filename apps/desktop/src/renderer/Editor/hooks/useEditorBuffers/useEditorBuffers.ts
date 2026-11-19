@@ -49,6 +49,8 @@ export interface OpenBuffer {
   epoch: number
   /** Metadata for a rejected reload, retained with the draft across navigation. */
   rejectedRead?: RejectedRead
+  /** The last save failed or got no reply (server unreachable); the text is only here. */
+  notSaved?: boolean
 }
 
 interface DiagnosticsState {
@@ -123,7 +125,7 @@ export interface EditorBuffersApi {
   error: string | null
   rejectedRead: RejectedRead | null
   revealRejectedRead: () => Promise<void>
-  tabs: { relPath: string; dirty: boolean }[]
+  tabs: { relPath: string; dirty: boolean; notSaved: boolean }[]
   diagnosticsSource: DiagnosticsSource | undefined
   statusCounts: DiagnosticCounts
   statusMissing: string[]
@@ -535,6 +537,7 @@ export function useEditorBuffers({
                   baseline: read.baseline,
                   externalChange: false,
                   rejectedRead: undefined,
+                  notSaved: undefined,
                   epoch: entry.epoch + 1,
                   [EDIT_REVISION]: entry[EDIT_REVISION] + 1,
                 }
@@ -709,6 +712,7 @@ export function useEditorBuffers({
   const tabs = buffers.map((buffer) => ({
     relPath: buffer.relPath,
     dirty: buffer.externalChange || buffer.content !== buffer.savedContent,
+    notSaved: buffer.notSaved === true,
   }))
 
   const activeResult =

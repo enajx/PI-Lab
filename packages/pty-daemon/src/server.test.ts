@@ -8,7 +8,7 @@ import { connect } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { DaemonClient } from "./client"
+import { type AttachResult, DaemonClient } from "./client"
 import { DaemonServer } from "./server"
 
 const NODE = process.execPath
@@ -92,22 +92,28 @@ async function waitFor(
   throw new Error("waitFor timed out")
 }
 
+/** The text an attach start shows: the snapshot screen (if any) and the bytes after it. */
+function startText(result: AttachResult): string {
+  const { start } = result
+  return (start.mode === "snapshot" ? start.screen : "") + start.bytes.toString()
+}
+
 /** Collect a session's data chunks and exit, draining via the async iterator. */
 async function drain(
   client: DaemonClient,
   sessionId: string,
 ): Promise<{ output: string; exitCode: number | null; signal: number | null }> {
-  let output = ""
+  const chunks: Buffer[] = []
   let exitCode: number | null = null
   let signal: number | null = null
   for await (const event of client.events(sessionId)) {
-    if (event.kind === "data") output += event.chunk
+    if (event.kind === "data") chunks.push(event.bytes)
     else {
       exitCode = event.exitCode
       signal = event.signal
     }
   }
-  return { output, exitCode, signal }
+  return { output: Buffer.concat(chunks).toString(), exitCode, signal }
 }
 
 describe("spawn + stream + exit", () => {
@@ -138,7 +144,7 @@ describe("spawn + stream + exit", () => {
     })
   })
 
-  test("disconnects a stalled reader while keeping its session available", async () => {
+  test("drops a stalled reader with a logged reason it reads last, while keeping its session available", async () => {
     const client = await newClient()
     const session = await client.spawn({
       command: NODE,
@@ -157,10 +163,29 @@ describe("spawn + stream + exit", () => {
       })
       slow.write(`${JSON.stringify({ kind: "attach", cid: "slow", sessionId: session.id })}\n`)
       await waitFor(() => connectionSubscriptions().length === 2)
+      const warn = vi.spyOn(console, "warn")
       await client.write(session.id, "start\n")
-      await waitFor(() => connectionSubscriptions().length === 1)
+      // Dropped: no more output is queued for it.
+      await waitFor(() =>
+        connectionSubscriptions().every((subscriptions) => subscriptions.size === 0),
+      )
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(/^\[pty-daemon\] dropped a client connection: pending output over/),
+      )
+      warn.mockRestore()
       expect((await client.list()).find(({ id }) => id === session.id)?.alive).toBe(true)
-      expect((await client.attach(session.id)).scrollback.length).toBeGreaterThan(0)
+      expect(startText(await client.attach(session.id, null)).length).toBeGreaterThan(0)
+      // Reading again, the slow client gets what was queued, then the reason, then the end.
+      let received = ""
+      slow.setEncoding("utf8")
+      slow.on("data", (chunk: string) => {
+        received += chunk
+      })
+      const ended = new Promise<void>((resolve) => slow.once("end", resolve))
+      slow.resume()
+      await ended
+      const last = JSON.parse(received.trimEnd().split("\n").at(-1) ?? "null")
+      expect(last).toEqual({ kind: "closing", reason: expect.stringContaining("pending output") })
     } finally {
       slow.destroy()
       await client.kill(session.id)
@@ -204,9 +229,9 @@ describe("session reaping", () => {
       await waitFor(() => ids.every((id) => firstExits.has(id)))
 
       for (const [index, id] of ids.entries()) {
-        const attached = await second.attach(id)
+        const attached = await second.attach(id, null)
         expect(attached.session.alive).toBe(false)
-        expect(attached.scrollback).toContain(`FINAL-${cycle}-${index}`)
+        expect(startText(attached)).toContain(`FINAL-${cycle}-${index}`)
         await waitFor(() => secondExits.has(id))
       }
       expect(connectionSubscriptions().map((subscriptions) => subscriptions.size)).toEqual([3, 3])
@@ -233,7 +258,7 @@ describe("session reaping", () => {
         )
         const ids = sessions.map((session) => session.id)
         references.push(...ids.map(weakSession))
-        await Promise.all(ids.map((id) => second.attach(id)))
+        await Promise.all(ids.map((id) => second.attach(id, null)))
 
         await waitFor(() => ids.every((id) => reapedIds.includes(id)), 8_000)
         expect(connectionSubscriptions().map((subscriptions) => subscriptions.size)).toEqual([0, 0])
@@ -255,7 +280,7 @@ describe("interactive write/echo", () => {
 
     let output = ""
     client.on("data", (event) => {
-      if (event.sessionId === session.id) output += event.chunk
+      if (event.sessionId === session.id) output += event.bytes.toString()
     })
 
     await client.write(session.id, "ping\n")
@@ -275,7 +300,7 @@ describe("reattach contract", () => {
 
     let firstOutput = ""
     first.on("data", (event) => {
-      if (event.sessionId === session.id) firstOutput += event.chunk
+      if (event.sessionId === session.id) firstOutput += event.bytes.toString()
     })
     await first.write(session.id, "MARKER-123\n")
     await waitFor(() => firstOutput.includes("MARKER-123"))
@@ -289,14 +314,14 @@ describe("reattach contract", () => {
     const sessions = await second.list()
     expect(sessions.some((s) => s.id === session.id && s.alive)).toBe(true)
 
-    const { session: reattached, scrollback } = await second.attach(session.id)
-    expect(reattached.alive).toBe(true)
-    expect(scrollback).toContain("MARKER-123")
+    const attached = await second.attach(session.id, null)
+    expect(attached.session.alive).toBe(true)
+    expect(startText(attached)).toContain("MARKER-123")
 
     // Live streaming resumes too: input written after reattach is echoed back.
     let liveOutput = ""
     second.on("data", (event) => {
-      if (event.sessionId === session.id) liveOutput += event.chunk
+      if (event.sessionId === session.id) liveOutput += event.bytes.toString()
     })
     await second.write(session.id, "AFTER-REATTACH\n")
     await waitFor(() => liveOutput.includes("AFTER-REATTACH"))
@@ -322,7 +347,7 @@ describe("resize", () => {
 
     let output = ""
     client.on("data", (event) => {
-      if (event.sessionId === session.id) output += event.chunk
+      if (event.sessionId === session.id) output += event.bytes.toString()
     })
 
     await client.resize(session.id, 120, 40)
@@ -428,7 +453,7 @@ test.skipIf(process.platform === "win32")(
     const session = await client.spawn({ command: "/bin/sh", args: ["-i"], cwd: socketDir })
     await client.write(session.id, "printf 'SHELL_READY\\n'\n")
     await waitFor(async () =>
-      (await client.attach(session.id)).scrollback.includes("SHELL_READY\r\n"),
+      startText(await client.attach(session.id, null)).includes("SHELL_READY\r\n"),
     )
     expect(session.pid).toBeGreaterThan(0)
     await client.kill(session.id)
@@ -442,7 +467,7 @@ test.skipIf(process.platform === "win32")(
 describe("error handling", () => {
   test("attaching to an unknown session yields a DaemonError", async () => {
     const client = await newClient()
-    await expect(client.attach("does-not-exist")).rejects.toMatchObject({
+    await expect(client.attach("does-not-exist", null)).rejects.toMatchObject({
       name: "DaemonError",
       code: "unknown-session",
     })
@@ -461,9 +486,9 @@ test("killing an agent PTY also stops its subprocess group", async () => {
   })
   let descendant = 0
   await waitFor(async () => {
-    const snapshot = await client.attach(session.id)
-    descendant = Number(snapshot.scrollback.match(/CHILD:(\d+)/)?.[1] ?? 0)
-    return descendant > 0 && snapshot.scrollback.includes("READY")
+    const text = startText(await client.attach(session.id, null))
+    descendant = Number(text.match(/CHILD:(\d+)/)?.[1] ?? 0)
+    return descendant > 0 && text.includes("READY")
   })
   try {
     process.kill(descendant, 0)
@@ -484,4 +509,115 @@ test("killing an agent PTY also stops its subprocess group", async () => {
       expect((error as NodeJS.ErrnoException).code).toBe("ESRCH")
     }
   }
+})
+
+describe.skipIf(process.platform === "win32")("ECHO and ICANON flags", () => {
+  /** Attach and record data and echo events in order, with the output text so far. */
+  async function watch(
+    client: DaemonClient,
+    sessionId: string,
+  ): Promise<{ result: AttachResult; events: string[]; text: () => string; end: () => number }> {
+    const events: string[] = []
+    const chunks: Buffer[] = []
+    let end = 0
+    client.on("data", (event) => {
+      if (event.sessionId !== sessionId) return
+      chunks.push(event.bytes)
+      end = event.offset + event.bytes.length
+      events.push(`data@${event.offset}`)
+    })
+    client.on("echo", (event) => {
+      if (event.sessionId === sessionId)
+        events.push(`echo ${event.input.echo} icanon ${event.input.icanon}@${event.offset}`)
+    })
+    const result = await client.attach(sessionId, null)
+    if (end === 0) end = result.start.offset + result.start.bytes.length
+    return {
+      result,
+      events,
+      text: () => startText(result) + Buffer.concat(chunks).toString("utf8"),
+      end: () => end,
+    }
+  }
+
+  test("stty -echo before a prompt: echo off is sent at the prompt's offset, before its output; stty echo after the answer turns it on after the next output", async () => {
+    const client = await newClient()
+    const session = await client.spawn({
+      command: "/bin/sh",
+      args: [
+        "-c",
+        "sleep 0.5; stty -echo; printf 'Password:'; read -r x; stty echo; printf 'done'; sleep 5",
+      ],
+    })
+    const seen = await watch(client, session.id)
+    await waitFor(() => seen.text().includes("Password:"), 10_000)
+    const prompt = seen.events.findIndex((event) => event.startsWith("echo false icanon true"))
+    expect(prompt).toBeGreaterThanOrEqual(0)
+    // The off event comes right before the chunk that holds the prompt, at its start.
+    const offAt = Number(seen.events[prompt]?.split("@")[1])
+    expect(seen.events[prompt + 1]).toBe(`data@${offAt}`)
+    await client.write(session.id, "secret\r")
+    await waitFor(() => seen.text().includes("done"), 10_000)
+    await waitFor(() => seen.events.some((event) => event.startsWith("echo true")), 5_000)
+    expect(seen.text()).not.toContain("secret")
+    const on = seen.events.find((event) => event.startsWith("echo true")) as string
+    expect(Number(on.split("@")[1])).toBe(seen.end())
+  })
+
+  test("read -s turns echo off without printing: the next key's write reads the flag and sends it at the current offset", async () => {
+    const client = await newClient()
+    const session = await client.spawn({
+      command: "/bin/bash",
+      args: [
+        "--noprofile",
+        "--norc",
+        "-c",
+        "printf ready; sleep 1; read -s -r x; printf got; sleep 5",
+      ],
+    })
+    const seen = await watch(client, session.id)
+    expect(seen.result.input).toEqual({ echo: true, icanon: true })
+    await waitFor(() => seen.text().includes("ready"), 10_000)
+    // Give bash time to enter `read -s` (it changes termios without output).
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await client.write(session.id, "z")
+    await waitFor(() => seen.events.some((event) => event.startsWith("echo false")), 5_000)
+    const off = seen.events.find((event) => event.startsWith("echo false")) as string
+    expect(Number(off.split("@")[1])).toBe(seen.end())
+    // A new attach starts with the flag off.
+    expect((await (await newClient()).attach(session.id, null)).input).toEqual({
+      echo: false,
+      icanon: true,
+    })
+    await client.write(session.id, "\r")
+    await waitFor(() => seen.events.some((event) => event.startsWith("echo true")), 10_000)
+    expect(seen.text()).not.toContain("z")
+  })
+
+  test("a shell's line editor turns ECHO and ICANON off (not hidden input): the change is sent after the output read with it", async () => {
+    const client = await newClient()
+    const session = await client.spawn({
+      command: "/bin/bash",
+      args: ["--noprofile", "--norc", "-i"],
+      env: { PS1: "PROMPT$ " },
+    })
+    const seen = await watch(client, session.id)
+    await waitFor(() => seen.text().includes("PROMPT$ "), 10_000)
+    await client.write(session.id, "x")
+    await waitFor(
+      async () =>
+        JSON.stringify((await (await newClient()).attach(session.id, null)).input) ===
+        JSON.stringify({ echo: false, icanon: false }),
+      5_000,
+    )
+    const change = seen.events.find((event) => event.startsWith("echo false icanon false"))
+    if (change !== undefined) {
+      // Never placed before a chunk: it follows the output it was read with.
+      const at = seen.events.indexOf(change)
+      const offset = Number(change.split("@")[1])
+      const previous = seen.events.slice(0, at).filter((event) => event.startsWith("data@"))
+      expect(previous.length).toBeGreaterThan(0)
+      expect(Number(previous.at(-1)?.split("@")[1])).toBeLessThan(offset)
+    }
+  })
 })

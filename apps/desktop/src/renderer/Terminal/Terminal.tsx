@@ -1,10 +1,37 @@
 import { FitAddon } from "@xterm/addon-fit"
 import { type ITheme, Terminal as XTerm } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
-import { type CSSProperties, useEffect, useRef } from "react"
+import { type CSSProperties, useEffect, useRef, useState } from "react"
 import { registerDictationTarget } from "../dictation/targets"
+import { useTranslate } from "../i18n/language"
+import { readComposeChoice, useLocalEcho, writeComposeChoice } from "../preferences/preferences"
 import { createPiLabTrpcClient, type PiLabTrpcClient } from "../trpc/client"
+import { connectionStatus } from "../trpc/connectionStatus"
+import { startOnce } from "../trpc/launch"
+import { ComposeLine } from "./ComposeLine"
+import { KeySender } from "./keyInput"
+import { PredictionEngine } from "./localEcho"
+import { LocalEchoOverlay } from "./localEchoOverlay"
 import { mapTerminalKeyEvent, type TerminalInputKind } from "./terminalKeyMapping"
+import { TerminalStream } from "./terminalStream"
+
+/**
+ * This document's id toward the server's terminals: the server lets the client
+ * that typed last keep its PTY size for a few seconds (`terminal.resize`).
+ */
+const CLIENT_ID = crypto.randomUUID()
+
+/**
+ * The next key's number in this document's sequence (shared by every pane,
+ * since the daemon counts keys per client id). The daemon's echo ack names it.
+ */
+let nextKeySeq = 0
+
+/** The daemon sends a key's echo ack this long after writing it (ECHO_ACK_DELAY_MS). */
+const ECHO_ACK_DELAY_MS = 50
+
+/** Agent terminals show the compose line on their own over this round trip, unless the user chose. */
+const COMPOSE_DEFAULT_ROUND_TRIP_MS = 80
 
 /**
  * Live terminal pane wired end-to-end to the `terminal` tRPC
@@ -21,12 +48,26 @@ import { mapTerminalKeyEvent, type TerminalInputKind } from "./terminalKeyMappin
  *     leading chunk, so an attaching pane sees prior output. This is how the
  *     session/workspace view renders a running agent.
  *
+ * Output arrives through `terminal.output` with resume (see terminalStream.ts):
+ * after a dropped connection the pane subscribes again from the bytes its
+ * emulator applied, so the screen continues without a gap or a duplicate.
+ *
+ * Size: the emulator always has the PTY's size. Focusing the pane asks the
+ * server for this pane's size; the server refuses while another client typed
+ * in the last few seconds, and then the pane shows the PTY with a margin (or
+ * scaled down when the PTY is larger than the pane).
+ *
  * Lifecycle ownership is deliberate: on unmount we unsubscribe and **detach**
  * (the subscription's teardown calls the daemon's `detach`) — we never `kill`.
  * The session lives in the separate pty-daemon process so it survives an Electron
  * reload; killing here would defeat that survival contract.
  *
  * Scrolling is xterm's own viewport, not Radix `ScrollArea`.
+ *
+ * Flow control (terminalStream.ts): a pane that is not shown (`visible` false,
+ * or the window hidden) ends its subscription and resumes when shown. While
+ * the user has a selection or has scrolled up, the server holds a skip to the
+ * latest screen instead of replacing the view.
  */
 
 interface TerminalProps {
@@ -55,10 +96,74 @@ interface TerminalProps {
   command?: string
   /** Extra argv for {@link command} (spawn mode only). */
   args?: string[]
+  /** Whether the pane is on screen (a dock tab in front); hidden panes get no output. */
+  visible: boolean
 }
 
-export function Terminal({ client, inputKind, sessionId, cwd, command, args }: TerminalProps) {
+/**
+ * Notices about the pane, shown in a banner above xterm. They are never written
+ * into xterm: its screen must hold only the daemon's bytes, or resume and
+ * snapshots would differ from the daemon's emulator.
+ */
+type NoticeKind = "write" | "resize" | "drop" | "exit" | "connection" | "start" | "input"
+
+/** One banner line: fixed English wording (translated when shown) and an optional detail. */
+interface Notice {
+  text: string
+  detail: string | null
+}
+
+/** Follows `document.visibilityState` (a minimised or hidden window). */
+function useDocumentVisible(): boolean {
+  const [visible, setVisible] = useState(document.visibilityState !== "hidden")
+  useEffect(() => {
+    const update = () => setVisible(document.visibilityState !== "hidden")
+    document.addEventListener("visibilitychange", update)
+    return () => document.removeEventListener("visibilitychange", update)
+  }, [])
+  return visible
+}
+
+export function Terminal({
+  client,
+  inputKind,
+  sessionId,
+  cwd,
+  command,
+  args,
+  visible,
+}: TerminalProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const t = useTranslate()
+  const [localEcho] = useLocalEcho()
+  const engineRef = useRef<PredictionEngine | null>(null)
+  const localEchoRef = useRef(localEcho)
+  localEchoRef.current = localEcho
+  useEffect(() => {
+    engineRef.current?.setMode(localEcho)
+  }, [localEcho])
+  const [notices, setNotices] = useState<Partial<Record<NoticeKind, Notice>>>({})
+  /** The pane's session, once spawned or attached. */
+  const [boundSession, setBoundSession] = useState<string | null>(null)
+  /** The user's compose-line choice for this session (remembered), or null before one. */
+  const [composeChoice, setComposeChoice] = useState<boolean | null>(null)
+  /** The round trip measured from the stream's acks is over the compose default threshold. */
+  const [slowLink, setSlowLink] = useState(false)
+  const sendMessageRef = useRef<((text: string) => Promise<void>) | null>(null)
+  const composeOn = composeChoice ?? (inputKind === "agent" && slowLink)
+  const streamRef = useRef<TerminalStream | null>(null)
+  const documentVisible = useDocumentVisible()
+  const shown = visible && documentVisible
+  const shownRef = useRef(shown)
+  shownRef.current = shown
+  useEffect(() => {
+    streamRef.current?.setVisible(shown)
+    // Predictions are cleared when the pane is hidden (the stream starts again when shown).
+    if (!shown) {
+      engineRef.current?.reset()
+      overlayRef.current?.draw()
+    }
+  }, [shown])
 
   // Effect deps are intentionally empty: a terminal pane binds to one session for
   // its lifetime. Options are captured in a ref so changing a prop never
@@ -69,10 +174,12 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
   // Track the app's resolved mode and CSS-token palette so the terminal follows
   // Appearance changes without re-attaching the session.
   const xtermRef = useRef<XTerm | null>(null)
+  const overlayRef = useRef<LocalEchoOverlay | null>(null)
   useEffect(() => {
     const root = document.documentElement
     const observer = new MutationObserver(() => {
-      if (xtermRef.current) xtermRef.current.options.theme = currentTerminalTheme()
+      if (xtermRef.current)
+        xtermRef.current.options.theme = overlayRef.current?.theme() ?? currentTerminalTheme()
     })
     observer.observe(root, { attributes: true, attributeFilter: ["class", "style"] })
     return () => observer.disconnect()
@@ -92,15 +199,33 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
     } = optionsRef.current
     const trpc = injected ?? createPiLabTrpcClient()
 
+    // No convertEol: the daemon's emulator applies the same raw bytes, so snapshots match.
     const xterm = new XTerm({
-      convertEol: true,
       cursorBlink: true,
       fontFamily:
         'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
       fontSize: 13,
       theme: currentTerminalTheme(),
+      // Local echo draws its predictions as decorations, a proposed API in xterm 5.5.
+      allowProposedApi: true,
     })
     xtermRef.current = xterm
+    const engine = new PredictionEngine(localEchoRef.current)
+    engineRef.current = engine
+    const overlay = new LocalEchoOverlay(xterm, engine, currentTerminalTheme)
+    overlayRef.current = overlay
+    /** When each of this pane's keys was sent (performance clock), by sequence number. */
+    const keySentAt = new Map<number, number>()
+    const redraw = (): void => overlay.draw()
+    const writeParsed = xterm.onWriteParsed(redraw)
+    const updateDisconnected = (): void => {
+      const state = connectionStatus.state()
+      engine.setDisconnected(state !== "connected")
+      // Past the short-drop window: keys still waiting are not sent.
+      if (state === "disconnected") keySender?.discardWaiting()
+      redraw()
+    }
+    const unsubscribeStatus = connectionStatus.subscribe(updateDisconnected)
     const fitAddon = new FitAddon()
     xterm.loadAddon(fitAddon)
     xterm.open(container)
@@ -110,25 +235,49 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
     // into a disposed terminal.
     let cancelled = false
     let sessionId: string | null = null
-    let unsubscribe: (() => void) | null = null
+    let stream: TerminalStream | null = null
+    let focusTarget: HTMLTextAreaElement | null = null
+    /** The PTY size as the stream last reported it; null until the first start. */
+    let ptySize: { cols: number; rows: number } | null = null
+    /** Sends typed keys at most once, also across a dropped connection (keyInput.ts). */
+    let keySender: KeySender | null = null
+    /** Smoothed round trip of the stream's acks (ms), or null before the first. */
+    let ackRoundTrip: number | null = null
     let inputDisposable: { dispose: () => void } | null = null
+    const viewDisposables: { dispose: () => void }[] = []
     let resizeObserver: ResizeObserver | null = null
     let unregisterDictation: (() => void) | null = null
-    const failedTransports = new Set<"write" | "resize">()
+    const showNotice = (kind: NoticeKind, text: string, detail: string | null): void => {
+      if (cancelled) return
+      setNotices((current) => ({ ...current, [kind]: { text, detail } }))
+    }
+    const clearNotice = (kind: NoticeKind): void => {
+      if (cancelled) return
+      setNotices((current) => {
+        if (current[kind] === undefined) return current
+        const next = { ...current }
+        delete next[kind]
+        return next
+      })
+    }
+    const errorText = (error: unknown): string =>
+      error instanceof Error ? error.message : String(error)
     const reportTransportFailure = (operation: "write" | "resize", error: unknown): void => {
-      if (cancelled || failedTransports.has(operation)) return
-      failedTransports.add(operation)
-      const message = error instanceof Error ? error.message : String(error)
-      xterm.write(`\r\n[pi-lab] terminal ${operation} failed: ${message}\r\n`)
+      showNotice(
+        operation,
+        operation === "write" ? "Terminal input failed" : "Terminal resize failed",
+        errorText(error),
+      )
     }
 
     /** Forward one input chunk exactly once, whether xterm generated or custom-mapped. */
     const forwardInput = (data: string): void => {
-      if (cancelled || !sessionId) return
-      void trpc.terminal.write.mutate({ sessionId, data }).then(
-        () => failedTransports.delete("write"),
-        (error: unknown) => reportTransportFailure("write", error),
-      )
+      if (cancelled || !sessionId || keySender === null) return
+      const sentAt = performance.now()
+      const seq = keySender.send(data)
+      keySentAt.set(seq, sentAt)
+      engine.key(data, seq, overlay.screen())
+      redraw()
     }
 
     /** Insert native paths as one shell argument each, leaving submission to the user. */
@@ -138,20 +287,21 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
       event.preventDefault()
       event.stopPropagation()
       if (!sessionId) {
-        xterm.write("\r\n[pi-lab] terminal is not ready for dropped paths\r\n")
+        showNotice("drop", "The terminal is not ready for dropped paths", null)
         return
       }
       let paths: string[]
       try {
         paths = files.map((file) => window.piLab?.getPathForFile?.(file) ?? "")
       } catch {
-        xterm.write("\r\n[pi-lab] could not read a dropped file path\r\n")
+        showNotice("drop", "Could not read a dropped file path", null)
         return
       }
       if (paths.some((path) => path.length === 0)) {
-        xterm.write("\r\n[pi-lab] could not read a dropped file path\r\n")
+        showNotice("drop", "Could not read a dropped file path", null)
         return
       }
+      clearNotice("drop")
       forwardInput(paths.map(quoteShellPath).join(" "))
       xterm.focus()
     }
@@ -176,44 +326,133 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
       return false
     })
 
-    /** Fit to the container, then push the new grid size to the PTY. */
-    const syncSize = () => {
-      if (cancelled || !sessionId) return
-      try {
-        fitAddon.fit()
-      } catch {
-        // The container can be momentarily zero-sized during layout; ignore and
-        // let the next ResizeObserver tick re-fit.
-        return
-      }
-      void trpc.terminal.resize.mutate({ sessionId, cols: xterm.cols, rows: xterm.rows }).then(
-        () => failedTransports.delete("resize"),
-        (error: unknown) => reportTransportFailure("resize", error),
+    /** Show the PTY-sized emulator inside the pane: a margin, or scaled down when it is larger. */
+    const fitView = (): void => {
+      const element = xterm.element
+      const screen = element?.querySelector<HTMLElement>(".xterm-screen")
+      if (!element || !screen || screen.offsetWidth === 0 || screen.offsetHeight === 0) return
+      const scale = Math.min(
+        1,
+        container.clientWidth / screen.offsetWidth,
+        container.clientHeight / screen.offsetHeight,
       )
+      element.style.transformOrigin = "0 0"
+      element.style.transform = scale < 1 ? `scale(${scale})` : ""
+    }
+
+    /** Ask the server to give the PTY this pane's size (it refuses while another client types). */
+    const takeSize = () => {
+      if (cancelled || !sessionId) return
+      const proposed = fitAddon.proposeDimensions()
+      // The container can be momentarily zero-sized during layout; the next resize tick retries.
+      if (!proposed || !(proposed.cols > 0) || !(proposed.rows > 0)) return
+      if (ptySize && proposed.cols === ptySize.cols && proposed.rows === ptySize.rows) return
+      void trpc.terminal.resize
+        .mutate({ sessionId, cols: proposed.cols, rows: proposed.rows, clientId: CLIENT_ID })
+        .then(
+          () => clearNotice("resize"),
+          (error: unknown) => reportTransportFailure("resize", error),
+        )
+    }
+
+    const onPaneResize = () => {
+      fitView()
+      if (document.activeElement === focusTarget) takeSize()
     }
 
     /** Wire the streaming subscription + stdin forwarding for a session id. */
     const bind = (id: string) => {
       sessionId = id
+      setBoundSession(id)
+      setComposeChoice(readComposeChoice(id))
+      sendMessageRef.current = async (text) => {
+        await startOnce((messageId) =>
+          trpc.terminal.sendMessage.mutate({ sessionId: id, messageId, text, clientId: CLIENT_ID }),
+        )
+      }
 
-      // Stream daemon output into xterm. `onData` yields our `TerminalEvent`
-      // discriminated union: incremental `data` chunks (including replayed
-      // scrollback as a single leading chunk) then a terminal `exit`.
-      const subscription = trpc.terminal.onData.subscribe(
-        { sessionId: id },
-        {
-          onData: (event) => {
-            if (cancelled) return
-            if (event.type === "data") xterm.write(event.chunk)
-            else xterm.write(`\r\n[pi-lab] session exited (code ${event.exitCode ?? "?"})\r\n`)
-          },
-          onError: (error) => {
-            if (cancelled) return
-            xterm.write(`\r\n[pi-lab] terminal connection failed: ${error.message}\r\n`)
-          },
+      // Stream daemon output into xterm, resuming after dropped connections.
+      stream = new TerminalStream({
+        subscribe: (input, handlers) => trpc.terminal.output.subscribe(input, handlers),
+        ack: (input) => {
+          // The acks' round trips give the link's round trip (for the compose-line default).
+          const sentAt = performance.now()
+          return trpc.terminal.ack.mutate(input).then((reply) => {
+            const sample = performance.now() - sentAt
+            ackRoundTrip =
+              ackRoundTrip === null ? sample : ackRoundTrip + (sample - ackRoundTrip) / 8
+            if (!cancelled) setSlowLink(ackRoundTrip > COMPOSE_DEFAULT_ROUND_TRIP_MS)
+            return reply
+          })
         },
-      )
-      unsubscribe = () => subscription.unsubscribe()
+        sessionId: id,
+        emulator: {
+          write: (data, applied) => xterm.write(data, applied),
+          resize: (cols, rows) => xterm.resize(cols, rows),
+        },
+        dropPolicy: "keep",
+        onSize: (cols, rows) => {
+          ptySize = { cols, rows }
+          engine.reset()
+          redraw()
+          requestAnimationFrame(fitView)
+        },
+        onStart: (input) => {
+          // A replay, refresh or snapshot (also a flow-control skip) clears every prediction.
+          engine.reset()
+          engine.setInput(input)
+          redraw()
+        },
+        onEcho: (input) => {
+          engine.setInput(input)
+          redraw()
+        },
+        onEchoAck: (ack) => {
+          if (ack.clientId !== CLIENT_ID) return
+          const sentAt = keySentAt.get(ack.seq)
+          if (sentAt !== undefined) engine.roundTrip(performance.now() - sentAt - ECHO_ACK_DELAY_MS)
+          for (const seq of keySentAt.keys()) if (seq <= ack.seq) keySentAt.delete(seq)
+          engine.setInput(ack.input)
+          engine.ack(ack.seq, overlay.screen())
+          redraw()
+        },
+        onExit: (exitCode) => {
+          showNotice("exit", "Session exited", `code ${exitCode ?? "?"}`)
+        },
+        onError: (message) => {
+          showNotice("connection", "Terminal connection failed", message)
+        },
+      })
+      streamRef.current = stream
+      const consumedBy = stream
+      keySender = new KeySender({
+        write: async (data, key, signal) =>
+          (
+            await trpc.terminal.write.mutate(
+              { sessionId: id, data, clientId: CLIENT_ID, key },
+              { signal },
+            )
+          ).status,
+        consumed: () => {
+          const point = consumedBy.consumed()
+          return point === null ? null : { generation: point.generation, offset: point.offset }
+        },
+        connection: () => connectionStatus.state(),
+        nextSeq: () => nextKeySeq++,
+        onLost: () =>
+          showNotice("input", "Some input typed during the disconnect was not sent", null),
+        onError: (error) => reportTransportFailure("write", error),
+        onDelivered: () => clearNotice("write"),
+      })
+      stream.setVisible(shownRef.current)
+      stream.open()
+
+      // Hold skips while the user selects text or reads scrolled-up output.
+      const updateHoldSkip = () => {
+        const buffer = xterm.buffer.active
+        stream?.setHoldSkip(xterm.hasSelection() || buffer.viewportY < buffer.baseY)
+      }
+      viewDisposables.push(xterm.onSelectionChange(updateHoldSkip), xterm.onScroll(updateHoldSkip))
 
       // Forward keystrokes (and pasted text) to the PTY's stdin.
       inputDisposable = xterm.onData(forwardInput)
@@ -226,11 +465,13 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
         focus: () => xterm.focus(),
       })
 
-      // Keep the PTY grid matched to the viewport.
-      resizeObserver = new ResizeObserver(() => syncSize())
+      // Focusing the pane takes the PTY size; resizing the focused pane keeps it.
+      focusTarget = xterm.textarea ?? null
+      focusTarget?.addEventListener("focus", takeSize)
+      resizeObserver = new ResizeObserver(onPaneResize)
       resizeObserver.observe(container)
-      syncSize()
       xterm.focus()
+      takeSize()
     }
 
     void (async () => {
@@ -260,9 +501,7 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
           rows: xterm.rows,
         })
       } catch (error) {
-        if (!cancelled) {
-          xterm.write(`\r\n[pi-lab] failed to start terminal: ${String(error)}\r\n`)
-        }
+        showNotice("start", "Failed to start terminal", errorText(error))
         return
       }
       if (cancelled) return
@@ -274,24 +513,91 @@ export function Terminal({ client, inputKind, sessionId, cwd, command, args }: T
       container.removeEventListener("dragover", onDragOver)
       container.removeEventListener("drop", onDrop)
       resizeObserver?.disconnect()
+      focusTarget?.removeEventListener("focus", takeSize)
       inputDisposable?.dispose()
+      for (const disposable of viewDisposables) disposable.dispose()
       unregisterDictation?.()
       // Unsubscribe first: the subscription's server-side teardown `detach`es the
       // session (it is NOT killed), so the PTY persists across reload.
-      unsubscribe?.()
+      stream?.close()
+      streamRef.current = null
+      writeParsed.dispose()
+      unsubscribeStatus()
+      overlay.dispose()
+      overlayRef.current = null
+      engineRef.current = null
+      sendMessageRef.current = null
       xterm.dispose()
       xtermRef.current = null
     }
   }, [])
 
+  const shownNotices = Object.entries(notices) as [NoticeKind, Notice][]
   return (
-    <div
-      ref={containerRef}
-      data-testid="terminal"
-      data-input-kind={inputKind}
-      data-session-id={sessionId}
-      style={{ ...paneStyle, background: "var(--background)" }}
-    />
+    <div style={{ ...paneStyle, display: "flex", flexDirection: "column" }}>
+      {shownNotices.length > 0 ? (
+        <div
+          role="alert"
+          data-testid="terminal-notice"
+          className="flex shrink-0 flex-col gap-1 border-b px-3 py-1.5 text-xs"
+        >
+          {shownNotices.map(([kind, notice]) => (
+            <div key={kind} className="flex items-center gap-2">
+              <span className="flex-1">
+                {notice.detail === null ? t(notice.text) : `${t(notice.text)}: ${notice.detail}`}
+              </span>
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() =>
+                  setNotices((current) => {
+                    const next = { ...current }
+                    delete next[kind]
+                    return next
+                  })
+                }
+              >
+                {t("Dismiss")}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div style={{ ...paneStyle, flex: 1, position: "relative" }}>
+        <div
+          ref={containerRef}
+          data-testid="terminal"
+          data-input-kind={inputKind}
+          data-session-id={sessionId}
+          style={{ ...paneStyle, background: "var(--background)" }}
+        />
+        {boundSession !== null ? (
+          <button
+            type="button"
+            data-testid="terminal-compose-toggle"
+            aria-pressed={composeOn}
+            title={t("Compose line: type a message and send it with Enter")}
+            className="absolute right-2 bottom-2 rounded-md border border-border bg-background px-1.5 py-0.5 text-muted-foreground text-xs hover:text-foreground"
+            onClick={() => {
+              writeComposeChoice(boundSession, !composeOn)
+              setComposeChoice(!composeOn)
+            }}
+          >
+            {t("Compose")}
+          </button>
+        ) : null}
+      </div>
+      {composeOn && boundSession !== null ? (
+        <ComposeLine
+          send={(text) => {
+            const send = sendMessageRef.current
+            if (send === null) return Promise.reject(new Error("the terminal is not ready"))
+            return send(text)
+          }}
+          focusTerminal={() => xtermRef.current?.focus()}
+        />
+      ) : null}
+    </div>
   )
 }
 

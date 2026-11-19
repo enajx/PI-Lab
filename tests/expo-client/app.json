@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "PI Lab Expo Check",
+    "slug": "pi-lab-expo-check",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "dev.pilab.expocheck",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    }
+  }
+}

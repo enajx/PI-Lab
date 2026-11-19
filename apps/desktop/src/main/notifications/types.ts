@@ -1,52 +1,25 @@
-import { z } from "zod"
+import type { z } from "zod"
+import type {
+  notificationActivationSchema,
+  notificationDeliveryErrorSchema,
+  notificationEventTypeSchema,
+  notificationSoundEventSchema,
+  notificationSoundSchema,
+} from "../../shared/clientApi"
 
-export const notificationSoundSchema = z.enum(["chime", "pulse", "success", "alert", "silent"])
+// The wire schemas live with the rest of the client API (shared/clientApi.ts).
+export {
+  notificationActivationSchema,
+  notificationDeliveryErrorSchema,
+  notificationEventTypeSchema,
+  notificationSoundEventSchema,
+  notificationSoundSchema,
+} from "../../shared/clientApi"
+
 export type NotificationSoundId = z.infer<typeof notificationSoundSchema>
-
-export const notificationEventTypeSchema = z.enum([
-  "agentInput",
-  "agentTurnCompletion",
-  "terminalCompletion",
-  "workflowStart",
-  "workflowCompletion",
-  "workflowFailure",
-])
 export type NotificationEventType = z.infer<typeof notificationEventTypeSchema>
-
-export const notificationActivationSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("agent"),
-    projectId: z.string().min(1),
-    workspaceId: z.string().min(1),
-    sessionId: z.string().min(1),
-    agentId: z.string().min(1),
-    /** The view the agent was started from; a click opens that view. */
-    origin: z.enum(["project", "latex", "analysis", "tasks", "routine"]),
-    label: z.string().min(1).optional(),
-  }),
-  z.object({
-    type: z.literal("workflow"),
-    workflowId: z.string().min(1),
-    runId: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal("terminal"),
-    projectId: z.string().min(1),
-    workspaceId: z.string().min(1),
-    sessionId: z.string().min(1),
-    label: z.string().min(1),
-  }),
-])
 export type NotificationActivation = z.infer<typeof notificationActivationSchema>
-
-export const notificationSoundEventSchema = z.object({
-  sound: notificationSoundSchema,
-})
 export type NotificationSoundEvent = z.infer<typeof notificationSoundEventSchema>
-
-export const notificationDeliveryErrorSchema = z.object({
-  message: z.string().min(1),
-})
 export type NotificationDeliveryError = z.infer<typeof notificationDeliveryErrorSchema>
 
 export interface NotificationEventSetting {

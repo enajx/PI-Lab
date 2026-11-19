@@ -4,14 +4,21 @@ import { randomUUID } from "node:crypto"
 import { EventEmitter } from "node:events"
 import { connect, type Socket } from "node:net"
 import {
+  type AttachReply,
+  type AttachStartFrame,
   type ClientRequest,
   type DaemonFrame,
   type DaemonReply,
   type DataEvent,
+  type EchoAckEvent,
+  type EchoEvent,
   type ErrorReply,
   type ExitEvent,
   encodeFrame,
   FrameDecoder,
+  type InputFlags,
+  type KeyInput,
+  type KeyStatus,
   type ProcessExitEvent,
   type ProcessOutputEvent,
   type ProcessParams,
@@ -19,6 +26,8 @@ import {
   type ProcessSnapshot,
   type ProcessSummary,
   parseDaemonFrame,
+  type ResizeEvent,
+  type ResumePoint,
   type SessionInfo,
 } from "./protocol"
 
@@ -48,9 +57,53 @@ export interface SpawnParams {
   rows?: number
 }
 
+/** How an attach starts; see {@link AttachStartFrame}. Bytes are decoded. */
+export type AttachStart =
+  | { mode: "replay"; offset: number; bytes: Buffer }
+  | { mode: "snapshot"; offset: number; screen: string; bytes: Buffer }
+  | { mode: "refresh"; base: ResumePoint; offset: number; screen: string; bytes: Buffer }
+
 export interface AttachResult {
   session: SessionInfo
-  scrollback: string
+  generation: string
+  /** Screen revision after the start is applied. */
+  revision: number
+  /** The PTY's ECHO and ICANON flags after the start. */
+  input: InputFlags
+  /** Current PTY size; a snapshot is written into a reset terminal of this size. */
+  cols: number
+  rows: number
+  start: AttachStart
+}
+
+function decodeStart(start: AttachStartFrame): AttachStart {
+  const bytes = Buffer.from(start.base64, "base64")
+  switch (start.mode) {
+    case "replay":
+      return { mode: "replay", offset: start.offset, bytes }
+    case "snapshot":
+      return { mode: "snapshot", offset: start.offset, screen: start.screen, bytes }
+    case "refresh":
+      return {
+        mode: "refresh",
+        base: start.base,
+        offset: start.offset,
+        screen: start.screen,
+        bytes,
+      }
+  }
+}
+
+function attachResult(reply: AttachReply): AttachResult {
+  return {
+    session: reply.session,
+    generation: reply.generation,
+    revision: reply.revision,
+    input: reply.input,
+    cols: reply.cols,
+    rows: reply.rows,
+    start: decodeStart(reply.start),
+  }
 }
 
 /** Listener signatures for the client's session-scoped events. */
@@ -58,15 +111,20 @@ export interface DaemonClientEvents {
   "process-output": (event: ProcessOutputEvent) => void
   "process-exit": (event: ProcessExitEvent) => void
   data: (event: DataEvent) => void
+  resize: (event: ResizeEvent) => void
+  echo: (event: EchoEvent) => void
+  "echo-ack": (event: EchoAckEvent) => void
   exit: (event: ExitEvent) => void
-  /** Emitted when the underlying socket closes. */
-  close: () => void
+  /** Emitted when the underlying socket closes, with the daemon's reason when it gave one. */
+  close: (reason: string | null) => void
 }
 
 export class DaemonClient extends EventEmitter {
   private socket: Socket | null = null
   private readonly decoder = new FrameDecoder()
   private readonly pending = new Map<string, PendingRequest>()
+  /** Why the daemon closed this connection, from its `closing` frame. */
+  private closingReason: string | null = null
 
   constructor(private readonly socketPath: string) {
     super()
@@ -105,7 +163,24 @@ export class DaemonClient extends EventEmitter {
     for (const value of decoded) {
       const frame = parseDaemonFrame(value)
       if (frame) this.dispatch(frame)
+      else this.rejectUnreadableReply(value)
     }
+  }
+
+  /** A reply this client cannot read (for example from an older daemon) fails its request. */
+  private rejectUnreadableReply(value: unknown): void {
+    if (typeof value !== "object" || value === null) return
+    const cid = (value as { cid?: unknown }).cid
+    if (typeof cid !== "string") return
+    const pending = this.pending.get(cid)
+    if (!pending) return
+    this.pending.delete(cid)
+    pending.reject(
+      new DaemonError(
+        "protocol-mismatch",
+        "the PTY daemon sent a reply in an older protocol; restart the daemon",
+      ),
+    )
   }
 
   private dispatch(frame: DaemonFrame): void {
@@ -113,9 +188,30 @@ export class DaemonClient extends EventEmitter {
       this.emit(frame.kind, frame)
       return
     }
-    if (frame.kind === "data" || frame.kind === "exit") {
+    if (frame.kind === "data") {
+      const event: DataEvent = {
+        kind: "data",
+        sessionId: frame.sessionId,
+        generation: frame.generation,
+        offset: frame.offset,
+        bytes: Buffer.from(frame.base64, "base64"),
+      }
+      this.emit("data", event)
+      this.emit(`session:${frame.sessionId}`, event)
+      return
+    }
+    if (frame.kind === "exit") {
       this.emit(frame.kind, frame)
       this.emit(`session:${frame.sessionId}`, frame)
+      return
+    }
+    if (frame.kind === "resize" || frame.kind === "echo" || frame.kind === "echo-ack") {
+      this.emit(frame.kind, frame)
+      this.emit(`session:${frame.sessionId}`, frame)
+      return
+    }
+    if (frame.kind === "closing") {
+      this.closingReason = frame.reason
       return
     }
     const pending = this.pending.get(frame.cid)
@@ -134,7 +230,7 @@ export class DaemonClient extends EventEmitter {
     for (const pending of this.pending.values()) pending.reject(closeError)
     this.pending.clear()
     this.socket = null
-    this.emit("close")
+    this.emit("close", this.closingReason)
   }
 
   private request<R extends Exclude<DaemonReply, ErrorReply>>(
@@ -210,6 +306,7 @@ export class DaemonClient extends EventEmitter {
     await this.processRequest((cid) => ({ kind: "process-forget", cid, id }), undefined)
   }
 
+  /** Spawn a PTY; this connection is attached to it from offset 0. */
   async spawn(params: SpawnParams): Promise<SessionInfo> {
     const reply = await this.request<Extract<DaemonReply, { kind: "spawn-ok" }>>((cid) => ({
       kind: "spawn",
@@ -224,20 +321,28 @@ export class DaemonClient extends EventEmitter {
     return reply.session
   }
 
-  /** Deliver replay synchronously at the reply boundary, before later frames in the same read. */
+  /**
+   * Attach to a session, resuming from `resume` when the daemon still can
+   * (otherwise, and for `null`, the start is a snapshot). `onStart` runs
+   * synchronously at the reply boundary, before later frames in the same read.
+   */
   async attach(
     sessionId: string,
-    onReplay?: (result: AttachResult) => void,
+    resume: ResumePoint | null,
+    onStart?: (result: AttachResult) => void,
+    preferReplay?: true,
   ): Promise<AttachResult> {
-    const reply = await this.request<Extract<DaemonReply, { kind: "attach-ok" }>>(
+    const reply = await this.request<AttachReply>(
       (cid) => ({
         kind: "attach",
         cid,
         sessionId,
+        resume,
+        ...(preferReplay ? { preferReplay } : {}),
       }),
-      (frame) => onReplay?.({ session: frame.session, scrollback: frame.scrollback }),
+      onStart ? (frame) => onStart(attachResult(frame)) : undefined,
     )
-    return { session: reply.session, scrollback: reply.scrollback }
+    return attachResult(reply)
   }
 
   async detach(sessionId: string): Promise<void> {
@@ -255,6 +360,34 @@ export class DaemonClient extends EventEmitter {
       sessionId,
       data,
     }))
+  }
+
+  /** Send a compose-line message: the text and Enter, in bracketed paste when the program enabled it. */
+  async writeMessage(sessionId: string, text: string): Promise<void> {
+    await this.request<Extract<DaemonReply, { kind: "write-ok" }>>((cid) => ({
+      kind: "write",
+      cid,
+      sessionId,
+      data: text,
+      message: true,
+    }))
+  }
+
+  /**
+   * Write a key the user typed (at most once; see `KeyInput`). The daemon
+   * sends an echo ack for a written key.
+   */
+  async writeKey(sessionId: string, data: string, key: KeyInput): Promise<KeyStatus> {
+    const reply = await this.request<Extract<DaemonReply, { kind: "write-ok" }>>((cid) => ({
+      kind: "write",
+      cid,
+      sessionId,
+      data,
+      key,
+    }))
+    if (reply.status === undefined)
+      throw new Error("the PTY daemon did not say what it did with a key")
+    return reply.status
   }
 
   async resize(sessionId: string, cols: number, rows: number): Promise<void> {
@@ -277,11 +410,20 @@ export class DaemonClient extends EventEmitter {
   }
 
   async list(): Promise<SessionInfo[]> {
-    const reply = await this.request<Extract<DaemonReply, { kind: "list-ok" }>>((cid) => ({
+    return (await this.listReply()).sessions
+  }
+
+  /** The protocol version the daemon speaks. A version 1 daemon does not report one. */
+  async protocolVersion(): Promise<number> {
+    const reply = await this.listReply()
+    return typeof reply.protocol === "number" ? reply.protocol : 1
+  }
+
+  private listReply(): Promise<Extract<DaemonReply, { kind: "list-ok" }>> {
+    return this.request<Extract<DaemonReply, { kind: "list-ok" }>>((cid) => ({
       kind: "list",
       cid,
     }))
-    return reply.sessions
   }
 
   /**

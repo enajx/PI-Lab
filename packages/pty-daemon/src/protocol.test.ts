@@ -48,7 +48,13 @@ describe("encodeFrame / FrameDecoder", () => {
   })
 
   test("carries terminal bytes (newlines, control chars) without corrupting framing", () => {
-    const event: DaemonFrame = { kind: "data", sessionId: "s", chunk: "line1\nline2\r\n[0m" }
+    const event: DaemonFrame = {
+      kind: "data",
+      sessionId: "s",
+      generation: "g",
+      offset: 0,
+      base64: Buffer.from("line1\nline2\r\n\x1b[0m").toString("base64"),
+    }
     const decoder = new FrameDecoder()
     const [decoded] = decoder.push(encodeFrame(event))
     expect(parseDaemonFrame(decoded)).toEqual(event)
@@ -92,7 +98,15 @@ describe("parseClientRequest", () => {
 describe("parseDaemonFrame", () => {
   test("accepts replies and events", () => {
     expect(parseDaemonFrame({ kind: "list-ok", cid: "c", sessions: [] })).not.toBeNull()
-    expect(parseDaemonFrame({ kind: "data", sessionId: "s", chunk: "x" })).not.toBeNull()
+    expect(
+      parseDaemonFrame({
+        kind: "data",
+        sessionId: "s",
+        generation: "g",
+        offset: 0,
+        base64: "eA==",
+      }),
+    ).not.toBeNull()
     expect(
       parseDaemonFrame({ kind: "exit", sessionId: "s", exitCode: 0, signal: null }),
     ).not.toBeNull()
@@ -100,6 +114,8 @@ describe("parseDaemonFrame", () => {
 
   test("rejects malformed frames", () => {
     expect(parseDaemonFrame({ kind: "data", sessionId: "s" })).toBeNull()
+    // A daemon from before protocol 2 sends decoded text.
+    expect(parseDaemonFrame({ kind: "data", sessionId: "s", chunk: "x" })).toBeNull()
     expect(parseDaemonFrame({ kind: "list-ok" })).toBeNull()
     expect(parseDaemonFrame({ kind: "???" })).toBeNull()
     expect(parseDaemonFrame(42)).toBeNull()

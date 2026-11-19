@@ -23,6 +23,8 @@ const SEED_CONTENT = "original line\n"
 const PY_FILE = "module.py"
 const PY_CONTENT = "import os\n\n\ndef main():\n    return 1\n"
 const PY_RUN_MARKER = "PYTHON-RUN-E2E-OK"
+/** Printed 2 s after the first marker, so a test can hide the run tab in between. */
+const PY_LATER_MARKER = "PYTHON-RUN-E2E-LATER"
 const APPENDED = "APPENDED-BY-E2E"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -61,6 +63,8 @@ if [ "\${1-}" != "${PY_FILE}" ]; then
   exit 64
 fi
 printf '${PY_RUN_MARKER}\\n'
+sleep 2
+printf '${PY_LATER_MARKER}\\n'
 `,
       { mode: 0o755 },
     )
@@ -372,6 +376,37 @@ test.describe("Python environment and run-file on POSIX", () => {
     const terminal = window.getByTestId("terminal")
     await expect(terminal).toBeVisible({ timeout: 30_000 })
     await expect(terminal).toContainText(PY_RUN_MARKER, { timeout: 30_000 })
+  })
+
+  test("a Run terminal tab hidden behind the file tab shows the output printed meanwhile when shown again", async () => {
+    const window = await app.firstWindow()
+    await expect(window.getByTestId("app-ready")).toBeVisible({ timeout: 30_000 })
+    await window.getByTestId("project-item").click()
+    await expect(window.getByTestId("project-view")).toBeVisible({ timeout: 30_000 })
+    await window.getByTestId("panel-tab-files").click()
+    await window.getByTestId("file-tree-file").filter({ hasText: PY_FILE }).click()
+    const editor = window.getByTestId("editor-buffer")
+    await expect(editor).toBeVisible({ timeout: 30_000 })
+    await editor.locator(".cm-content").click()
+    await window.keyboard.press("ControlOrMeta+Enter")
+    const terminal = window.getByTestId("terminal")
+    await expect(terminal).toContainText(PY_RUN_MARKER, { timeout: 30_000 })
+    await expect(terminal).not.toContainText(PY_LATER_MARKER)
+
+    // Hide the run tab: its pane gets no output until it is shown again.
+    await window
+      .locator('[data-testid="central-tab"][data-tab-kind="file"]')
+      .getByTestId("central-tab-select")
+      .click()
+    await expect(terminal).toBeHidden()
+    await new Promise((resolve) => setTimeout(resolve, 3_000))
+    await window
+      .getByTestId("central-tab")
+      .filter({ hasText: `Run ${PY_FILE}` })
+      .getByTestId("central-tab-select")
+      .click()
+    await expect(terminal).toContainText(PY_LATER_MARKER, { timeout: 10_000 })
+    await expect(terminal).toContainText(PY_RUN_MARKER)
   })
 
   // Since the split layout (#3), a below-editor run opens as its own Run tab in a

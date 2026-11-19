@@ -298,7 +298,7 @@ export function ProjectSetupWizard({
             </p>
             <div className="h-72 overflow-hidden rounded border border-border">
               <Suspense fallback={<p>{t("Loading terminal…")}</p>}>
-                <PlanningTerminal inputKind="agent" sessionId={sessionId} />
+                <PlanningTerminal inputKind="agent" sessionId={sessionId} visible />
               </Suspense>
             </div>
             <div className="flex justify-end gap-2">

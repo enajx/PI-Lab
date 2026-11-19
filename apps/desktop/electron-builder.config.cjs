@@ -7,11 +7,12 @@
  * Production public builds require a Developer ID identity and notarization.
  * Notarization accepts a Keychain profile or Apple ID credentials.
  *
- * Native modules (`better-sqlite3`, `node-pty`) need special packaging:
- * the compiled main bundle does a bare `require("better-sqlite3")`
- * / `require("node-pty")`, and the pty-daemon child (run via ELECTRON_RUN_AS_NODE)
- * loads node-pty's `pty.node` + its sibling `spawn-helper` from disk. Native `.node`
- * files cannot be read from inside an asar archive, so both modules are listed in
+ * Native modules (`better-sqlite3`, `node-pty`, `@pi-lab/pty-termios`) need
+ * special packaging: the compiled main bundle does a bare
+ * `require("better-sqlite3")` / `require("node-pty")`, and the pty-daemon child
+ * (run via ELECTRON_RUN_AS_NODE) loads node-pty's `pty.node` + its sibling
+ * `spawn-helper` and the termios addon from disk. Native `.node` files cannot be
+ * read from inside an asar archive, so these modules are listed in
  * `asarUnpack` — electron-builder then mirrors them into `app.asar.unpacked/` and
  * patches Node's resolver so the bare requires find the unpacked copies.
  *
@@ -67,12 +68,21 @@ const APP_FILES = [
   // These are the emitted main/daemon externals and their runtime dependency
   // tree. validate:package rejects a new external or transitive dependency
   // missing from this list before electron-builder runs.
-  "!**/node_modules/!(@jsquash|@trpc|@xterm|argparse|better-sqlite3|builder-util-runtime|copy-anything|debug|drizzle-orm|electron-updater|fs-extra|graceful-fs|h5wasm|is-what|jpeg-js|js-yaml|jsonfile|lazy-val|lodash.escaperegexp|lodash.isequal|ms|node-pty|omggif|pngjs|sax|semver|superjson|tiny-typed-emitter|trpc-electron|universalify|wasm-feature-detect|ws|zod)/**",
+  "!**/node_modules/!(@jsquash|@pi-lab|@trpc|@xterm|argparse|better-sqlite3|builder-util-runtime|debug|drizzle-orm|electron-updater|fs-extra|graceful-fs|h5wasm|jpeg-js|js-yaml|jsonfile|lazy-val|lodash.escaperegexp|lodash.isequal|ms|node-pty|omggif|pngjs|sax|semver|tiny-typed-emitter|trpc-electron|universalify|wasm-feature-detect|ws|zod)/**",
   "!**/node_modules/@jsquash/!(webp)/**",
   // h5wasm (Analysis HDF5 reader): only its Node build, which embeds the WASM.
   "!**/node_modules/h5wasm/!(dist|package.json|LICENSE.txt)",
   "!**/node_modules/h5wasm/dist/!(node)/**",
   "!**/node_modules/@trpc/!(server|client)/**",
+  // Workspace packages are bundled, except the native termios addon the daemon
+  // loads from disk. Ship only its loader, manifest and compiled binary.
+  "!**/node_modules/@pi-lab/!(pty-termios)/**",
+  "!**/node_modules/@pi-lab/pty-termios/!(index.cjs|package.json|build)",
+  "!**/node_modules/@pi-lab/pty-termios/!(build)/**",
+  "!**/node_modules/@pi-lab/pty-termios/build/!(Release)",
+  "!**/node_modules/@pi-lab/pty-termios/build/!(Release)/**",
+  "!**/node_modules/@pi-lab/pty-termios/build/Release/!(pty_termios.node)",
+  "!**/node_modules/@pi-lab/pty-termios/build/Release/*/**",
   "!**/node_modules/@xterm/!(headless)/**",
   // Keep native runtime libraries and target prebuilds; discard source builds,
   // headers and debug symbols. Per-platform filters below retain matching
@@ -153,7 +163,7 @@ const config = {
           },
         ]
       : [],
-  // Both native modules use N-API. Validate the installed binaries under Node
+  // All native modules use N-API. Validate the installed binaries under Node
   // and Electron before packaging instead of rebuilding or swapping ABIs.
   npmRebuild: false,
   buildDependenciesFromSource: false,
@@ -168,7 +178,11 @@ const config = {
   },
   // Native `.node` addons + node-pty's `spawn-helper` executable MUST live outside
   // the asar so they can be dlopen'd / exec'd at runtime.
-  asarUnpack: ["**/node_modules/better-sqlite3/**", "**/node_modules/node-pty/**"],
+  asarUnpack: [
+    "**/node_modules/better-sqlite3/**",
+    "**/node_modules/node-pty/**",
+    "**/node_modules/@pi-lab/pty-termios/**",
+  ],
   extraResources: [
     { from: "assets/dmg/background.tiff", to: "dmg-background.tiff" },
     { from: "resources", to: ".", filter: ["skills/**/*"] },

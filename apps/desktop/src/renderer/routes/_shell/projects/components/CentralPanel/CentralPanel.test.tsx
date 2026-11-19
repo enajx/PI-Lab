@@ -783,6 +783,7 @@ describe("CentralPanel — panel", () => {
         origin: "project",
         agentId: "claude-code",
         workspaceMode: "worktree",
+        launchId: expect.any(String),
       },
     ])
     const activeTab = screen
