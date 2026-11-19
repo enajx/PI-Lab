@@ -1414,5 +1414,6 @@
   "Unknown": "未知",
   "Connection": "连接",
   "Server version": "服务器版本",
-  "Click to show its projects on the Projects Dashboard; right-click for more.": "点击可在项目仪表板中显示其项目；右键查看更多选项。"
+  "Click to show its projects on the Projects Dashboard; right-click for more.": "点击可在项目仪表板中显示其项目；右键查看更多选项。",
+  "Could not read ~/.ssh/config": "无法读取 ~/.ssh/config"
 }

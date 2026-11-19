@@ -1414,5 +1414,6 @@
   "Unknown": "Desconocido",
   "Connection": "Conexión",
   "Server version": "Versión del servidor",
-  "Click to show its projects on the Projects Dashboard; right-click for more.": "Haz clic para ver sus proyectos en el Panel de proyectos; clic derecho para más opciones."
+  "Click to show its projects on the Projects Dashboard; right-click for more.": "Haz clic para ver sus proyectos en el Panel de proyectos; clic derecho para más opciones.",
+  "Could not read ~/.ssh/config": "No se pudo leer ~/.ssh/config"
 }

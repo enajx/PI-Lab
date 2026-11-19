@@ -1414,5 +1414,6 @@
   "Unknown": "Ukjent",
   "Connection": "Tilkobling",
   "Server version": "Serverversjon",
-  "Click to show its projects on the Projects Dashboard; right-click for more.": "Klikk for å vise prosjektene på prosjektoversikten; høyreklikk for mer."
+  "Click to show its projects on the Projects Dashboard; right-click for more.": "Klikk for å vise prosjektene på prosjektoversikten; høyreklikk for mer.",
+  "Could not read ~/.ssh/config": "Kunne ikke lese ~/.ssh/config"
 }

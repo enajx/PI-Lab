@@ -1414,5 +1414,6 @@
   "Unknown": "غير معروف",
   "Connection": "الاتصال",
   "Server version": "إصدار الخادم",
-  "Click to show its projects on the Projects Dashboard; right-click for more.": "انقر لعرض مشاريعه في لوحة المشاريع؛ انقر بزر الفأرة الأيمن لمزيد من الخيارات."
+  "Click to show its projects on the Projects Dashboard; right-click for more.": "انقر لعرض مشاريعه في لوحة المشاريع؛ انقر بزر الفأرة الأيمن لمزيد من الخيارات.",
+  "Could not read ~/.ssh/config": "تعذّرت قراءة ~/.ssh/config"
 }

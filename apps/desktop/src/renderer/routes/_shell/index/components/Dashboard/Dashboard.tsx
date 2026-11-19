@@ -29,7 +29,11 @@ import {
 } from "../../../../../machines/MachineControls"
 import { showMachineUi, useMachines, useRemoteProjects } from "../../../../../machines/machines"
 import { projectRoute } from "../../../../../machines/projectRoute"
-import { RemoteProjectCards, remoteHiddenCount } from "../../../../../machines/RemoteProjects"
+import {
+  hiddenProjectCount,
+  RemoteProjectCards,
+  shownProjects,
+} from "../../../../../machines/RemoteProjects"
 import {
   useMachineFilter,
   useShowHiddenProjects,
@@ -123,17 +127,14 @@ export function Dashboard() {
   const showLocal = filterShows(machineFilter, null)
 
   const projects = localProjects ?? []
-  // This Mac's hidden projects and the machines' (both show with Show hidden).
-  const hiddenCount =
-    localProjects === undefined || machineList === null
-      ? null
-      : projects.filter((project) => Boolean(project.archivedAt)).length + remoteHiddenCount(remote)
+  // The machines the filter shows. Their hidden projects and this Mac's (when shown) count for Show hidden.
+  const shownRemote = remote.filter((entry) => filterShows(machineFilter, entry.machine.machineId))
+  const hiddenCount = hiddenProjectCount(
+    showLocal ? localProjects : [],
+    machineList === null ? null : shownRemote,
+  )
   const [showHidden, setShowHidden] = useShowHiddenProjects(hiddenCount)
-  const visibleProjects = !showLocal
-    ? []
-    : showHidden
-      ? projects
-      : projects.filter((project) => !project.archivedAt)
+  const visibleProjects = showLocal ? shownProjects(projects, showHidden) : []
   const [reorderError, setReorderError] = useState<string | null>(null)
   const reorderProjects = useProjectReorder(setReorderError)
   const sensors = useSensors(
@@ -236,16 +237,14 @@ export function Dashboard() {
               ))}
             </SortableContext>
           </DndContext>
-          {remote
-            .filter((entry) => filterShows(machineFilter, entry.machine.machineId))
-            .map((entry) => (
-              <RemoteProjectCards
-                key={entry.machine.machineId}
-                machine={entry.machine}
-                projects={entry.projects}
-                showHidden={showHidden}
-              />
-            ))}
+          {shownRemote.map((entry) => (
+            <RemoteProjectCards
+              key={entry.machine.machineId}
+              machine={entry.machine}
+              projects={entry.projects}
+              showHidden={showHidden}
+            />
+          ))}
           <AddProjectMenu
             variant="dashboard-card"
             onAdded={(_project, machineId) => {

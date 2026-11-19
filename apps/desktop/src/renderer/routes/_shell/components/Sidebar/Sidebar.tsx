@@ -33,8 +33,13 @@ import {
   useMachineState,
   useMachines,
   useRemoteProjects,
+  whileMachinesAdded,
 } from "../../../../machines/machines"
-import { RemoteProjectRows, remoteHiddenCount } from "../../../../machines/RemoteProjects"
+import {
+  hiddenProjectCount,
+  RemoteProjectRows,
+  shownProjects,
+} from "../../../../machines/RemoteProjects"
 import {
   dismissNonGitNotice,
   SIDEBAR_MAX_WIDTH,
@@ -381,18 +386,15 @@ export function Sidebar() {
   const localProjects = localOff ? [] : projectsQuery.data
   const projectActivityStates = useProjectActivityStates()
   // Remote machines: their projects follow this Mac's, each with a machine label.
-  // Read again every few seconds, so the Machines group shows an update that is
-  // available or running also while Settings is closed.
-  const machineList = useMachines(MACHINES_REFRESH_MS)
+  // Read again every few seconds while a machine is added, so the Machines group
+  // shows an update that is available or running also while Settings is closed.
+  const machineList = useMachines(whileMachinesAdded(MACHINES_REFRESH_MS))
   const machines = machineList ?? []
   const remote = useRemoteProjects(machines)
   const routeParams = useParams({ strict: false }) as { machineId?: string; projectId?: string }
   const projects = localProjects ?? []
   // This Mac's hidden projects and the machines' (both show with Show hidden).
-  const hiddenCount =
-    localProjects === undefined || machineList === null
-      ? null
-      : projects.filter((project) => Boolean(project.archivedAt)).length + remoteHiddenCount(remote)
+  const hiddenCount = hiddenProjectCount(localProjects, machineList === null ? null : remote)
   const [collapsed, setCollapsed] = useSidebarCollapsed()
   const [width, setWidth] = useSidebarWidth()
   const [showFeatureHelp, setShowFeatureHelp] = useSidebarFeatureHelp()
@@ -464,7 +466,7 @@ export function Sidebar() {
 
   // `projects.list` returns the saved project order, the one the Dashboard cards use too.
   const reorderProjects = useProjectReorder((message) => setActionError(message))
-  const orderedProjects = projects.filter((project) => showHidden || !project.archivedAt)
+  const orderedProjects = shownProjects(projects, showHidden)
   const projectRowProps = useDragReorder(
     orderedProjects.map((project) => project.id),
     reorderProjects,
@@ -632,9 +634,7 @@ export function Sidebar() {
         <MachineMenu
           key={machineMenu.machineId}
           machine={machineMenuEntry.machine}
-          projectCount={
-            machineMenuEntry.projects.filter((project) => showHidden || !project.archivedAt).length
-          }
+          projectCount={shownProjects(machineMenuEntry.projects, showHidden).length}
           position={{ x: machineMenu.x, y: machineMenu.y }}
           onClose={() => setMachineMenu(null)}
           onError={setActionError}

@@ -446,7 +446,7 @@ function AddMachineForm() {
     enabled: add.isPending,
     refetchInterval: ADD_PROGRESS_REFRESH_MS,
   })
-  // The suggestions are optional: when they cannot be read the field offers none.
+  // The suggestions are optional: when they cannot be read the field offers none and says why.
   const known = hosts.data ?? []
   // Choosing a Host from ~/.ssh/config fills an empty Name (or the one it filled before) with it.
   const chooseHost = (next: string) => {
@@ -464,6 +464,14 @@ function AddMachineForm() {
         suggestions={known}
         onChange={chooseHost}
       />
+      {hosts.error ? (
+        <p
+          data-testid="settings-add-machine-hosts-error"
+          className="px-4 pb-3 text-amber-600 text-xs dark:text-amber-400"
+        >
+          {`${t("Could not read ~/.ssh/config")}: ${hosts.error.message}`}
+        </p>
+      ) : null}
       <TextField
         testId="settings-add-machine-name"
         label="Name"

@@ -100,22 +100,39 @@ export function setMachinesSourceForTests(source: () => Promise<MachineSummary[]
  */
 export const MACHINES_REFRESH_MS = 2_000
 
+/** How often {@link useMachines} reads the list again: a fixed interval, none, or one chosen from the last list. */
+export type MachinesRefetch =
+  | number
+  | false
+  | ((machines: MachineSummary[] | undefined) => number | false)
+
+/**
+ * Read the list every `intervalMs` only while a machine is added (the sidebar):
+ * no IPC round trip every few seconds for a single computer. Adding the first
+ * machine invalidates the list, which reads it again and starts the polling.
+ */
+export function whileMachinesAdded(intervalMs: number): MachinesRefetch {
+  return (machines) => (machines !== undefined && machines.length > 0 ? intervalMs : false)
+}
+
 /**
  * The machines this app connects to (Electron main, `desktop.machines.list`).
  * Call it outside every {@link MachineScope}: the list lives in the root
- * query cache. Connections of machines that left the list are closed.
+ * query cache. Connections of machines that left the list are closed. Only a
+ * failed first read throws; a failed later read keeps the last list.
  */
-export function useMachines(refetchIntervalMs: number | false): MachineSummary[] | null {
+export function useMachines(refetch: MachinesRefetch): MachineSummary[] | null {
   const query = useQuery({
     queryKey: MACHINES_QUERY_KEY,
     queryFn: () => listMachines(),
-    refetchInterval: refetchIntervalMs,
+    refetchInterval:
+      typeof refetch === "function" ? (current) => refetch(current.state.data) : refetch,
   })
   const data = query.data
   useEffect(() => {
     if (data) closeRemovedMachines(new Set(data.map((machine) => machine.machineId)))
   }, [data])
-  if (query.isError) throw query.error
+  if (query.isError && data === undefined) throw query.error
   return data ?? null
 }
 
@@ -153,6 +170,8 @@ export interface MachineProjects {
   machine: MachineSummary
   projects: ProjectListItem[]
   error: string | null
+  /** The list is known (read from the machine, or from the cache); false while the first read runs or after it failed with no cache. */
+  known: boolean
 }
 
 /** The root-cache query key of a machine's project list ({@link useRemoteProjects}). */
@@ -226,5 +245,6 @@ export function useRemoteProjects(machines: MachineSummary[]): MachineProjects[]
     machine,
     projects: results[index]?.data ?? [],
     error: results[index]?.error?.message ?? null,
+    known: results[index]?.data !== undefined,
   }))
 }
