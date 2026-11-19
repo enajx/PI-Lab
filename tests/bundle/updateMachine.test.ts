@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs"
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import { afterAll, beforeAll, expect, it } from "vitest"
@@ -100,6 +100,19 @@ it("updates a machine that is behind the bundle this app carries", async () => {
   })
   expect(await helloVersion(asking, added.machineId)).toBe(v1.version)
   await asking.close()
+
+  // A version that did not start there before is refused, shown as the update error.
+  const failedVersions = join(access.serverPrefix, "failed-versions")
+  writeFileSync(failedVersions, `${v2.version}\n`)
+  const refused = connections(v2)
+  refused.setBehindPolicy("auto")
+  refused.start()
+  await expect
+    .poll(() => refused.list()[0]?.updateError ?? "", { timeout: 120_000, interval: 500 })
+    .toContain("did not start before")
+  expect(refused.list()[0]).toMatchObject({ version: v1.version, updating: false })
+  await refused.close()
+  rmSync(failedVersions)
 
   // "Update automatically": the app installs v2 over ssh and connects again.
   const auto = connections(v2)

@@ -20,10 +20,14 @@
 # The new server must write `server.json` within PI_LAB_INSTALL_START_TIMEOUT
 # seconds (default 120). If it does not, the previous version is put back,
 # with the database copy the new server made before its migrations
-# (`local.db.pre-<build>`), and the installer exits 1.
+# (`local.db.pre-<build>`), and the installer exits 1. A version listed in
+# `failed-versions` is not installed again. One install runs at a time per
+# prefix (`<prefix>/install.lock`).
 #
 # Exit codes: 0 installed and listening; 1 failed; 2 usage; 3 a PI Lab desktop
-# app server already serves the data folder (PI Lab uses that server).
+# app server already serves the data folder (PI Lab uses that server); 4 the
+# version did not start before (listed in `failed-versions`); 5 another install
+# runs on this prefix.
 set -eu
 
 RELEASES="https://github.com/enajx/PI-Lab/releases"
@@ -108,8 +112,15 @@ mkdir -p "$prefix/versions" "$data_dir"
 prefix=$(cd "$prefix" && pwd -P)
 data_dir=$(cd "$data_dir" && pwd -P)
 
+# One install at a time: the server's daily self-update and the app's update can overlap.
+lock="$prefix/install.lock"
+if ! mkdir "$lock" 2>/dev/null; then
+  say "another install runs on $prefix; if none does (an install was killed), delete $lock and try again"
+  exit 5
+fi
+work=""
+trap 'rm -rf "$work"; rmdir "$lock"' EXIT
 work=$(mktemp -d "$prefix/.install.XXXXXX")
-trap 'rm -rf "$work"' EXIT
 
 # 1. The bundle and its SHA-256.
 if [ -n "$from_file" ]; then
@@ -153,6 +164,10 @@ bundle_arch=$(json_field arch "$bundle/bundle.json")
 [ -z "$version" ] || [ "$version" = "$new_version" ] ||
   die "the bundle holds version $new_version, not $version"
 [ "$bundle_arch" = "$arch" ] || die "the bundle is for $bundle_arch, this Mac is $arch"
+if [ -f "$prefix/failed-versions" ] && grep -qxF "$new_version" "$prefix/failed-versions"; then
+  say "version $new_version did not start before, so it is not installed again; to try it anyway, delete its line from $prefix/failed-versions"
+  exit 4
+fi
 
 # 3. The server that runs on this data folder now.
 discovery="$data_dir/server.json"
@@ -294,6 +309,10 @@ if [ -n "$previous_target" ] && [ "$previous_target" != "versions/$new_version" 
 fi
 
 # 5. Start it, or roll back to the previous version.
+# A database copy of this build from an earlier install is moved aside: only a
+# copy the new server makes now may be restored on a rollback.
+copy="$data_dir/local.db.pre-$new_build"
+if [ -f "$copy" ]; then mv -f "$copy" "$data_dir/local.db.stale-pre-$new_build"; fi
 start_server
 if ! wait_for_server "$new_build"; then
   echo "$new_version" >>"$prefix/failed-versions"
@@ -304,7 +323,6 @@ if ! wait_for_server "$new_build"; then
   fi
   say "version $new_version did not start; going back to $previous_target"
   stop_server "$started_pid"
-  copy="$data_dir/local.db.pre-$new_build"
   if [ -f "$copy" ]; then
     for suffix in "" -wal -shm; do
       if [ -f "$data_dir/local.db$suffix" ]; then

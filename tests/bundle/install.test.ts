@@ -1,5 +1,14 @@
 import { type ChildProcess, spawn } from "node:child_process"
-import { chmodSync, existsSync, mkdirSync, readdirSync, readlinkSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import { afterAll, beforeAll, expect, it } from "vitest"
@@ -146,4 +155,50 @@ it("refuses when a desktop app server already serves the data folder", async () 
   expect(result.code).toBe(3)
   expect(result.stderr).toContain("PI Lab uses that server")
   expect(existsSync(join(t.prefix, "current"))).toBe(false)
+})
+
+it("a failed version rolls back without an older database copy, and is not installed again", async () => {
+  const t = setup("failed-version")
+  const [v1] = bundles as [BuiltBundle]
+  const broken = repackBundle(
+    v1,
+    "0.0.9-installtest",
+    `${v1.build.slice(0, 15)}9`,
+    t.dir,
+    (dir) => {
+      writeFileSync(join(dir, "bin", "pi-lab-server"), "#!/bin/sh\nexit 1\n")
+    },
+  )
+  expect((await runInstall(INSTALLER, t.args(v1), t.env)).code).toBe(0)
+  // A copy of the broken build's database left by an earlier install: never restored.
+  const stale = join(t.dataDir, `local.db.pre-${broken.build}`)
+  writeFileSync(stale, "an older copy")
+
+  const failed = await runInstall(INSTALLER, t.args(broken), t.env)
+  expect(failed.code, failed.stderr).toBe(1)
+  expect(failed.stderr).toContain("runs again")
+  expect(readFileSync(join(t.dataDir, "local.db"), "utf8")).not.toBe("an older copy")
+  expect(await helloVersion(t.dataDir)).toBe(v1.version)
+  expect(readFileSync(join(t.prefix, "failed-versions"), "utf8")).toContain(broken.version)
+
+  const pid = readServerDiscovery(t.dataDir)?.pid
+  const again = await runInstall(INSTALLER, t.args(broken), t.env)
+  expect(again.code, again.stderr).toBe(4)
+  expect(again.stderr).toContain("did not start before")
+  expect(again.stderr).toContain(join(t.prefix, "failed-versions"))
+  expect(readServerDiscovery(t.dataDir)?.pid).toBe(pid)
+})
+
+it("refuses while another install holds the prefix's lock", async () => {
+  const t = setup("locked")
+  mkdirSync(join(t.prefix, "install.lock"), { recursive: true })
+  const result = await runInstall(INSTALLER, t.args(bundles[0] as BuiltBundle), t.env)
+  expect(result.code, result.stderr).toBe(5)
+  expect(result.stderr).toContain(join(t.prefix, "install.lock"))
+  expect(existsSync(join(t.prefix, "current"))).toBe(false)
+  // The lock of the other install stays; after a finished install there is none.
+  expect(existsSync(join(t.prefix, "install.lock"))).toBe(true)
+  rmSync(join(t.prefix, "install.lock"), { recursive: true })
+  expect((await runInstall(INSTALLER, t.args(bundles[0] as BuiltBundle), t.env)).code).toBe(0)
+  expect(existsSync(join(t.prefix, "install.lock"))).toBe(false)
 })
