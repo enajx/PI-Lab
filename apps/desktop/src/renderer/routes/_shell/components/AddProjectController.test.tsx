@@ -116,7 +116,7 @@ describe("AddProjectControllerProvider", () => {
     expect(screen.queryByTestId("add-project-dialog")).toBeNull()
     expect(onAdded).not.toHaveBeenCalled()
     fireEvent.click(screen.getByTestId("add-project-folder"))
-    await waitFor(() => expect(onAdded).toHaveBeenCalledWith(project))
+    await waitFor(() => expect(onAdded).toHaveBeenCalledWith(project, null))
     expect(openProject).toHaveBeenLastCalledWith({
       path: "/tmp/project-added",
       details: {

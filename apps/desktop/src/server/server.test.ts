@@ -1,5 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { hostname, tmpdir } from "node:os"
 import { join } from "node:path"
 import { DaemonServer } from "@pi-lab/pty-daemon"
 import { createTRPCClient, createWSClient, TRPCClientError, wsLink } from "@trpc/client"
@@ -19,7 +19,15 @@ import {
   secretProtectionSchema,
   serverHelloSchema,
 } from "../shared/clientApi"
-import { ensureLocalToken, proveServerIdentity, TOKEN_FILE, TOKEN_HEADER } from "./access"
+import {
+  ensureLocalToken,
+  ensureMachineId,
+  MACHINE_ID_FILE,
+  proveDeviceIdentity,
+  proveServerIdentity,
+  TOKEN_FILE,
+  TOKEN_HEADER,
+} from "./access"
 import { DEVICES_FILE } from "./devices"
 import { type ListeningServer, listen } from "./http"
 import type { ServerRuntime } from "./runtime"
@@ -53,6 +61,7 @@ beforeAll(async () => {
     build: "test-build",
     version: "0.0.0-test",
     port: 0,
+    install: null,
   })
   await runtime.start(() => undefined)
   token = ensureLocalToken(dataDir)
@@ -94,9 +103,39 @@ test("a client with the local token gets the hello and project data over loopbac
   const { client, close } = connect(token)
   const hello = await client.server.hello.query()
   expect(hello).toMatchObject({ protocol: 1, build: "test-build", version: "0.0.0-test" })
-  expect(hello.capabilities).toEqual(["devices", "launch-ids", "answer-request"])
+  expect(hello.capabilities).toEqual(["devices", "launch-ids", "answer-request", "machines"])
   expect(await client.projects.list.query()).toEqual([])
   close()
+})
+
+test("Update machines automatically: on by default, saved by the server; no self-update for an app's server", async () => {
+  const { client, close } = connect(token)
+  expect(await client.server.updates.settings.query()).toEqual({
+    autoUpdate: true,
+    selfUpdate: false,
+  })
+  await client.server.updates.setAutoUpdate.mutate({ autoUpdate: false })
+  expect((await client.server.updates.settings.query()).autoUpdate).toBe(false)
+  await client.server.updates.setAutoUpdate.mutate({ autoUpdate: true })
+  expect((await client.server.hello.query()).capabilities).not.toContain("server-update")
+  close()
+})
+
+test("hello names this machine: a stable id from an owner-only file, host name, platform and arch", async () => {
+  const { client, close } = connect(token)
+  const hello = await client.server.hello.query()
+  close()
+  expect(hello.capabilities).toContain("machines")
+  expect(hello).toMatchObject({
+    hostname: hostname(),
+    platform: process.platform,
+    arch: process.arch,
+  })
+  const path = join(dataDir, MACHINE_ID_FILE)
+  expect(readFileSync(path, "utf8").trim()).toBe(hello.machineId)
+  expect(statSync(path).mode & 0o777).toBe(0o600)
+  // The next server start reads the same id.
+  expect(ensureMachineId(dataDir)).toBe(hello.machineId)
 })
 
 test("the local token file is readable by its owner only", () => {
@@ -364,6 +403,8 @@ test("a broken devices.json entry or a failing token check never crashes the ser
         throw new Error("token check failed")
       },
       track: () => () => {},
+      proofKey: () => null,
+      revoke: () => {},
     },
     localToken: token,
     testRoutes: false,
@@ -510,6 +551,37 @@ test("GET /identity proves the server holds the token without sending it, new fo
   expect((await fetch(`http://127.0.0.1:${server.port}/identity?nonce=zz`)).status).toBe(400)
 })
 
+test("GET /identity with a device id proves the server knows that device's token; revoked or unknown devices get no proof", async () => {
+  const local = connect(token)
+  const created = await local.client.server.devices.create.mutate({ name: "Remote laptop" })
+  expect(await proveDeviceIdentity(server.port, created.device.id, created.token)).toBe(true)
+  // Another token for the same id, or an unknown id, is not accepted.
+  expect(await proveDeviceIdentity(server.port, created.device.id, "y".repeat(43))).toBe(false)
+  expect(await proveDeviceIdentity(server.port, "no-such-device", created.token)).toBe(false)
+  await local.client.server.devices.revoke.mutate({ id: created.device.id })
+  expect(await proveDeviceIdentity(server.port, created.device.id, created.token)).toBe(false)
+  local.close()
+})
+
+test("POST /device/revoke revokes the device whose token it carries; the local token is refused", async () => {
+  const local = connect(token)
+  const created = await local.client.server.devices.create.mutate({ name: "Leaving laptop" })
+  const revokeSelf = (presented: string) =>
+    fetch(`http://127.0.0.1:${server.port}/device/revoke`, {
+      method: "POST",
+      headers: { [TOKEN_HEADER]: presented },
+    })
+  expect((await revokeSelf(created.token)).status).toBe(204)
+  expect(await upgradeStatus(created.token)).toBe(401)
+  const listed = (await local.client.server.devices.list.query()).find(
+    (device) => device.id === created.device.id,
+  )
+  expect(listed?.revokedAt).toEqual(expect.any(Number))
+  expect((await revokeSelf(token)).status).toBe(403)
+  expect(await upgradeStatus(token)).toBe(101)
+  local.close()
+})
+
 /** Real server and WebSocket; the updater's network engine is a recording stand-in (injected). */
 test("public updates start with the server's data format and channel, and follow channel changes", async () => {
   const { PublicUpdateController } = await import("../main/updates/controller")
@@ -551,5 +623,126 @@ test("public updates start with the server's data format and channel, and follow
   await vi.waitFor(() => expect(updates.controller.current()).toEqual({ kind: "restart-required" }))
   expect(changes).toBe(1)
   updates.stop()
+  close()
+})
+
+/** A git repo opened as a project on this server; returns its main workspace id and folder. */
+async function projectWithFiles(): Promise<{ workspaceId: string; dir: string }> {
+  const { execFileSync } = await import("node:child_process")
+  const { mkdirSync, realpathSync, writeFileSync } = await import("node:fs")
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-lab-transfer-repo-")))
+  execFileSync("git", ["init", "-q", "-b", "main", dir])
+  writeFileSync(join(dir, "notes.txt"), "old notes\n")
+  mkdirSync(join(dir, "data", "deep"), { recursive: true })
+  writeFileSync(join(dir, "data", "a.csv"), "x,y\n1,2\n")
+  writeFileSync(join(dir, "data", "deep", "b.txt"), "ünïcode\n")
+  const { client, close } = connect(token)
+  const project = await client.projects.open.mutate({ path: dir })
+  const workspace = await client.workspaces.ensureMain.mutate({ projectId: project.id })
+  close()
+  return { workspaceId: workspace.id, dir }
+}
+
+function transferUrl(kind: "download" | "upload", query: Record<string, string>): string {
+  return `http://127.0.0.1:${server.port}/files/${kind}?${new URLSearchParams(query)}`
+}
+
+test("GET /files/download streams a file, and a folder as a tar archive; paths outside the project are refused", async () => {
+  const { execFileSync } = await import("node:child_process")
+  const { workspaceId } = await projectWithFiles()
+  const headers = { [TOKEN_HEADER]: token }
+  const file = await fetch(transferUrl("download", { workspaceId, relPath: "notes.txt" }), {
+    headers,
+  })
+  expect(file.status).toBe(200)
+  expect(file.headers.get("x-pi-lab-entry")).toBe("file")
+  expect(await file.text()).toBe("old notes\n")
+
+  const folder = await fetch(transferUrl("download", { workspaceId, relPath: "data" }), {
+    headers,
+  })
+  expect(folder.status).toBe(200)
+  expect(folder.headers.get("x-pi-lab-entry")).toBe("dir")
+  const out = mkdtempSync(join(tmpdir(), "pi-lab-transfer-out-"))
+  execFileSync("tar", ["-xf", "-", "-C", out], {
+    input: Buffer.from(await folder.arrayBuffer()),
+  })
+  expect(readFileSync(join(out, "a.csv"), "utf8")).toBe("x,y\n1,2\n")
+  expect(readFileSync(join(out, "deep", "b.txt"), "utf8")).toBe("ünïcode\n")
+  rmSync(out, { recursive: true, force: true })
+
+  const outside = await fetch(transferUrl("download", { workspaceId, relPath: "../x" }), {
+    headers,
+  })
+  expect(outside.status).toBe(403)
+  const missing = await fetch(transferUrl("download", { workspaceId, relPath: "none.txt" }), {
+    headers,
+  })
+  expect(missing.status).toBe(404)
+  expect((await fetch(transferUrl("download", { workspaceId, relPath: "notes.txt" }))).status).toBe(
+    401,
+  )
+})
+
+test("PUT /files/upload writes a file (folders made as needed), refuses to replace one unless asked", async () => {
+  const { workspaceId, dir } = await projectWithFiles()
+  const put = (relPath: string, body: string, replace: "0" | "1") =>
+    fetch(transferUrl("upload", { workspaceId, relPath, replace }), {
+      method: "PUT",
+      headers: { [TOKEN_HEADER]: token },
+      body,
+    })
+  expect((await put("new/sub/fresh.txt", "fresh\n", "0")).status).toBe(204)
+  expect(readFileSync(join(dir, "new", "sub", "fresh.txt"), "utf8")).toBe("fresh\n")
+  expect((await put("notes.txt", "new notes\n", "0")).status).toBe(409)
+  expect(readFileSync(join(dir, "notes.txt"), "utf8")).toBe("old notes\n")
+  expect((await put("notes.txt", "new notes\n", "1")).status).toBe(204)
+  expect(readFileSync(join(dir, "notes.txt"), "utf8")).toBe("new notes\n")
+  expect((await put("../escape.txt", "x", "1")).status).toBe(403)
+  // A symlink inside the workspace to a folder outside: the refused upload makes no folders there.
+  const { existsSync, symlinkSync } = await import("node:fs")
+  const outside = mkdtempSync(join(tmpdir(), "pi-lab-transfer-outside-"))
+  symlinkSync(outside, join(dir, "link"))
+  expect((await put("link/made/x.txt", "x", "1")).status).toBe(403)
+  expect(existsSync(join(outside, "made"))).toBe(false)
+  rmSync(outside, { recursive: true, force: true })
+})
+
+test("an interrupted upload leaves the old file intact; calls stay responsive during large transfers", async () => {
+  const { request } = await import("node:http")
+  const { readdirSync, writeFileSync } = await import("node:fs")
+  const { workspaceId, dir } = await projectWithFiles()
+  writeFileSync(join(dir, "big.bin"), Buffer.alloc(64 * 1024 * 1024, 7))
+  const { client, close } = connect(token)
+
+  // A large download whose reader stops reading: the server waits on the socket.
+  const download = await fetch(transferUrl("download", { workspaceId, relPath: "big.bin" }), {
+    headers: { [TOKEN_HEADER]: token },
+  })
+  expect(download.status).toBe(200)
+
+  // An upload that sends part of a file, then stops.
+  const upload = request(
+    transferUrl("upload", { workspaceId, relPath: "notes.txt", replace: "1" }),
+    {
+      method: "PUT",
+      headers: { [TOKEN_HEADER]: token },
+    },
+  )
+  upload.on("error", () => undefined)
+  upload.write(Buffer.alloc(8 * 1024 * 1024, 1))
+
+  // Editing a routine and answering an agent go over the same server: an ordinary call answers fast.
+  const started = Date.now()
+  await client.projects.list.query()
+  await client.settings.get.query()
+  expect(Date.now() - started).toBeLessThan(1_000)
+
+  upload.destroy()
+  await download.body?.cancel()
+  await vi.waitFor(() =>
+    expect(readdirSync(dir).filter((name) => name.includes(".pi-lab-upload-"))).toEqual([]),
+  )
+  expect(readFileSync(join(dir, "notes.txt"), "utf8")).toBe("old notes\n")
   close()
 })

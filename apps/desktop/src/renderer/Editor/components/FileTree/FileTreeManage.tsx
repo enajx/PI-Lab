@@ -4,6 +4,7 @@ import {
   ClipboardCopy,
   Copy,
   CopyPlus,
+  Download,
   FilePlus2,
   FileText,
   FolderPlus,
@@ -11,6 +12,7 @@ import {
   Pencil,
   Pin,
   Trash2,
+  Upload,
 } from "lucide-react"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { usePopupDismiss } from "../../../components/usePopupDismiss"
@@ -75,7 +77,12 @@ export interface TreeMenuActions {
   onOpen: (entry: TreeEntryRef) => void
   onNewFile: (entry: TreeEntryRef) => void
   onNewFolder: (entry: TreeEntryRef) => void
-  onReveal: (entry: TreeEntryRef) => void
+  /** Absent for a project on another machine (nothing to show in this Mac's Finder). */
+  onReveal?: (entry: TreeEntryRef) => void
+  /** Present only for a project on another machine: save the entry to this Mac. */
+  onDownload?: (entry: TreeEntryRef) => void
+  /** Present only for a project on another machine: upload files from this Mac into a folder. */
+  onUpload?: (entry: TreeEntryRef) => void
   onCopyPath: (entry: TreeEntryRef, form: "absolute" | "relative") => void
   onRename: (entry: TreeEntryRef) => void
   onDuplicate: (entry: TreeEntryRef) => void
@@ -141,12 +148,36 @@ export function FileTreeContextMenu({
     action()
   }
   const copyItems: MenuItem[] = [
-    {
-      label: t("Reveal in Finder"),
-      testId: "file-tree-reveal",
-      icon: FolderSearch,
-      run: run(() => actions.onReveal(entry)),
-    },
+    ...(actions.onReveal
+      ? [
+          {
+            label: t("Reveal in Finder"),
+            testId: "file-tree-reveal",
+            icon: FolderSearch,
+            run: run(() => actions.onReveal?.(entry)),
+          },
+        ]
+      : []),
+    ...(actions.onDownload
+      ? [
+          {
+            label: t("Download…"),
+            testId: "file-tree-download",
+            icon: Download,
+            run: run(() => actions.onDownload?.(entry)),
+          },
+        ]
+      : []),
+    ...(actions.onUpload && entry.kind === "dir"
+      ? [
+          {
+            label: t("Upload…"),
+            testId: "file-tree-upload",
+            icon: Upload,
+            run: run(() => actions.onUpload?.(entry)),
+          },
+        ]
+      : []),
     {
       label: t("Copy Path"),
       testId: "file-tree-copy-path",

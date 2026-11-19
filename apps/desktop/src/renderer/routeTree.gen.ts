@@ -22,6 +22,7 @@ import { Route as ShellScienceLatexRouteImport } from './routes/_shell/science/l
 import { Route as ShellScienceClusterRouteImport } from './routes/_shell/science/cluster'
 import { Route as ShellScienceAnalysisRouteImport } from './routes/_shell/science/analysis'
 import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell/projects/$projectId'
+import { Route as ShellMMachineIdProjectsProjectIdRouteImport } from './routes/_shell/m/$machineId/projects/$projectId'
 
 const ShellRoute = ShellRouteImport.update({
   id: '/_shell',
@@ -87,6 +88,12 @@ const ShellProjectsProjectIdRoute = ShellProjectsProjectIdRouteImport.update({
   path: '/projects/$projectId',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellMMachineIdProjectsProjectIdRoute =
+  ShellMMachineIdProjectsProjectIdRouteImport.update({
+    id: '/m/$machineId/projects/$projectId',
+    path: '/m/$machineId/projects/$projectId',
+    getParentRoute: () => ShellRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
@@ -101,6 +108,7 @@ export interface FileRoutesByFullPath {
   '/science/library': typeof ShellScienceLibraryRoute
   '/science/skills': typeof ShellScienceSkillsRoute
   '/science/tasks': typeof ShellScienceTasksRoute
+  '/m/$machineId/projects/$projectId': typeof ShellMMachineIdProjectsProjectIdRoute
 }
 export interface FileRoutesByTo {
   '/automations': typeof ShellAutomationsRoute
@@ -115,6 +123,7 @@ export interface FileRoutesByTo {
   '/science/library': typeof ShellScienceLibraryRoute
   '/science/skills': typeof ShellScienceSkillsRoute
   '/science/tasks': typeof ShellScienceTasksRoute
+  '/m/$machineId/projects/$projectId': typeof ShellMMachineIdProjectsProjectIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -131,6 +140,7 @@ export interface FileRoutesById {
   '/_shell/science/library': typeof ShellScienceLibraryRoute
   '/_shell/science/skills': typeof ShellScienceSkillsRoute
   '/_shell/science/tasks': typeof ShellScienceTasksRoute
+  '/_shell/m/$machineId/projects/$projectId': typeof ShellMMachineIdProjectsProjectIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -147,6 +157,7 @@ export interface FileRouteTypes {
     | '/science/library'
     | '/science/skills'
     | '/science/tasks'
+    | '/m/$machineId/projects/$projectId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/automations'
@@ -161,6 +172,7 @@ export interface FileRouteTypes {
     | '/science/library'
     | '/science/skills'
     | '/science/tasks'
+    | '/m/$machineId/projects/$projectId'
   id:
     | '__root__'
     | '/_shell'
@@ -176,6 +188,7 @@ export interface FileRouteTypes {
     | '/_shell/science/library'
     | '/_shell/science/skills'
     | '/_shell/science/tasks'
+    | '/_shell/m/$machineId/projects/$projectId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -275,6 +288,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellProjectsProjectIdRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/m/$machineId/projects/$projectId': {
+      id: '/_shell/m/$machineId/projects/$projectId'
+      path: '/m/$machineId/projects/$projectId'
+      fullPath: '/m/$machineId/projects/$projectId'
+      preLoaderRoute: typeof ShellMMachineIdProjectsProjectIdRouteImport
+      parentRoute: typeof ShellRoute
+    }
   }
 }
 
@@ -291,6 +311,7 @@ interface ShellRouteChildren {
   ShellScienceLibraryRoute: typeof ShellScienceLibraryRoute
   ShellScienceSkillsRoute: typeof ShellScienceSkillsRoute
   ShellScienceTasksRoute: typeof ShellScienceTasksRoute
+  ShellMMachineIdProjectsProjectIdRoute: typeof ShellMMachineIdProjectsProjectIdRoute
 }
 
 const ShellRouteChildren: ShellRouteChildren = {
@@ -306,6 +327,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellScienceLibraryRoute: ShellScienceLibraryRoute,
   ShellScienceSkillsRoute: ShellScienceSkillsRoute,
   ShellScienceTasksRoute: ShellScienceTasksRoute,
+  ShellMMachineIdProjectsProjectIdRoute: ShellMMachineIdProjectsProjectIdRoute,
 }
 
 const ShellRouteWithChildren = ShellRoute._addFileChildren(ShellRouteChildren)

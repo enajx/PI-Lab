@@ -11,6 +11,7 @@ import { TitleBarSystemControls } from "../titleBar"
 import { DictationSection } from "./components/DictationSection"
 import { DocumentToolsSection } from "./components/DocumentToolsSection"
 import { LatexSection } from "./components/LatexSection"
+import { MachinesSection } from "./components/MachinesSection"
 import { ProjectTemplateSection } from "./components/ProjectTemplateSection"
 import { QuickEditorSection } from "./components/QuickEditorSection"
 import {
@@ -128,6 +129,12 @@ const SECTIONS = [
     label: "Project view",
     description: "Choose which file and Git panels appear in project workspaces.",
     render: () => <ProjectViewSection />,
+  },
+  {
+    id: "machines",
+    label: "Machines",
+    description: "Connect to PI Lab servers on other computers over SSH.",
+    render: () => <MachinesSection />,
   },
   {
     id: "sections",

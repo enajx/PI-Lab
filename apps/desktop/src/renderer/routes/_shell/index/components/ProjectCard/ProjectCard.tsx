@@ -21,6 +21,8 @@ import { ProjectStatusControl } from "../../../../../components/ProjectStatus"
 import { useSkillLink } from "../../../../../components/ProjectWorkflow"
 import { usePopupDismiss } from "../../../../../components/usePopupDismiss"
 import { useInterfaceLanguage, useTranslate } from "../../../../../i18n/language"
+import { MachineLabel } from "../../../../../machines/MachineControls"
+import { projectRoute } from "../../../../../machines/projectRoute"
 import {
   useDigitalRainDensity,
   useDigitalRainSpeed,
@@ -81,11 +83,25 @@ const GRADIENT_LAYER_NAMES = ["a", "b", "c"] as const
 const CARD_ACTION_CLASS =
   "inline-flex h-7 flex-1 items-center justify-center rounded-md border border-border text-muted-foreground outline-none transition-colors hover:bg-accent/60 hover:text-hover-foreground focus-visible:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
 
-interface ProjectCardProps {
-  project: ProjectSummary
+/** The other machine a project card's project lives on. */
+export interface CardMachine {
+  machineId: string
+  name: string
+  /** The machine is disconnected (its label shows monitor-off). */
+  offline: boolean
 }
 
-export function ProjectCard({ project }: ProjectCardProps) {
+interface ProjectCardProps {
+  project: ProjectSummary
+  /**
+   * The other machine the project lives on, or null for this Mac. A remote
+   * card is rendered inside that machine's `MachineScope`, so its calls go to
+   * that server; its links open the machine's views (`machineId`).
+   */
+  machine: CardMachine | null
+}
+
+export function ProjectCard({ project, machine }: ProjectCardProps) {
   const t = useTranslate()
   const trpc = useTRPC()
   const navigate = useNavigate()
@@ -157,9 +173,14 @@ export function ProjectCard({ project }: ProjectCardProps) {
 
   // A paper added in the LaTeX Editor with no project: its card offers only the paper.
   const paperOnly = project.metadata?.paperOnly === true
+  // The Tasks, Analysis and LaTeX views follow the project's machine.
+  const viewSearch =
+    machine === null
+      ? { projectId: project.id }
+      : { machineId: machine.machineId, projectId: project.id }
   const openProject = () => {
-    if (paperOnly) void navigate({ to: "/science/latex", search: { projectId: project.id } })
-    else void navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
+    if (paperOnly) void navigate({ to: "/science/latex", search: viewSearch })
+    else void navigate(projectRoute(machine?.machineId ?? null, project.id))
   }
 
   // Auto-research: record the launch intent and open the project **immediately** —
@@ -233,12 +254,15 @@ export function ProjectCard({ project }: ProjectCardProps) {
     : null
 
   // Persist the default (or the recolor) exactly once: the mutation refreshes the
-  // list, after which the stored palette matches and this no longer fires.
+  // list, after which the stored palette matches and this no longer fires. A
+  // remote card of a disconnected machine (shown from the cached list) waits
+  // until the machine is back.
   const persistDefault = setGradient.mutate
+  const machineOffline = machine?.offline === true
   useEffect(() => {
-    if (!defaultGradient) return
+    if (!defaultGradient || machineOffline) return
     persistDefault({ id: project.id, gradient: defaultGradient })
-  }, [defaultGradient, project.id, persistDefault])
+  }, [defaultGradient, machineOffline, project.id, persistDefault])
 
   const generateGradient = () => {
     artworkGenerationRef.current += 1
@@ -303,6 +327,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
     <div
       data-testid="project-card"
       data-project-id={project.id}
+      data-machine-id={machine?.machineId}
       data-state={state}
       data-hidden={Boolean(project.archivedAt)}
       className={cn(
@@ -477,12 +502,25 @@ export function ProjectCard({ project }: ProjectCardProps) {
           )}
           className="flex flex-col items-start gap-1.5 px-2.5 py-2 text-start outline-none transition-colors focus-visible:bg-accent/40"
         >
-          <span
-            data-testid="project-card-title"
-            className="w-full min-w-0 truncate font-medium text-foreground text-sm"
-          >
-            {project.name}
-          </span>
+          {machine === null ? (
+            <span
+              data-testid="project-card-title"
+              className="w-full min-w-0 truncate font-medium text-foreground text-sm"
+            >
+              {project.name}
+            </span>
+          ) : (
+            // A project on another machine: its machine label at the end of the title line.
+            <span className="flex w-full min-w-0 items-center gap-2">
+              <span
+                data-testid="project-card-title"
+                className="min-w-0 flex-1 truncate font-medium text-foreground text-sm"
+              >
+                {project.name}
+              </span>
+              <MachineLabel name={machine.name} offline={machine.offline} />
+            </span>
+          )}
           <span
             data-testid="project-card-status"
             data-state={state}
@@ -521,9 +559,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
             data-feature-label={t("Tasks")}
             data-feature-help={t("Open this project's tasks")}
             className={CARD_ACTION_CLASS}
-            onClick={() =>
-              void navigate({ to: "/science/tasks", search: { projectId: project.id } })
-            }
+            onClick={() => void navigate({ to: "/science/tasks", search: viewSearch })}
           >
             <ListTodo className="size-4 shrink-0" aria-hidden />
           </button>
@@ -537,9 +573,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
             data-feature-label={t("Analysis")}
             data-feature-help={t("Open this project's analysis files")}
             className={CARD_ACTION_CLASS}
-            onClick={() =>
-              void navigate({ to: "/science/analysis", search: { projectId: project.id } })
-            }
+            onClick={() => void navigate({ to: "/science/analysis", search: viewSearch })}
           >
             <ChartArea className="size-4 shrink-0" aria-hidden />
           </button>
@@ -552,7 +586,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
           data-feature-label={t("LaTeX Editor")}
           data-feature-help={t("Open this project's paper in the LaTeX Editor")}
           className={CARD_ACTION_CLASS}
-          onClick={() => void navigate({ to: "/science/latex", search: { projectId: project.id } })}
+          onClick={() => void navigate({ to: "/science/latex", search: viewSearch })}
         >
           <ScrollText className="size-4 shrink-0" aria-hidden />
         </button>
@@ -609,6 +643,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
           project={project}
           onClose={() => setEditing(false)}
           mode="edit"
+          canPickPaperFolder={machine === null}
           pending={updateDetails.isPending}
           error={updateDetails.error?.message ?? null}
           onSave={saveDetails}

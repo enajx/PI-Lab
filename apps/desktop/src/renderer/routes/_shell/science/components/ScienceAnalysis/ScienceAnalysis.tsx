@@ -36,6 +36,7 @@ import { ProjectWorkflowControl } from "../../../../../components/ProjectWorkflo
 import type { TreeMenuState } from "../../../../../Editor/components/FileTree/FileTreeManage"
 import { FILE_DRAG_TYPE } from "../../../../../Editor/fileDrag"
 import { useTranslate } from "../../../../../i18n/language"
+import { useMachineScope } from "../../../../../machines/machines"
 import {
   ANALYSIS_FILES_MAX_WIDTH,
   ANALYSIS_FILES_MIN_WIDTH,
@@ -154,10 +155,17 @@ export function ScienceAnalysis({
 
   const [savedProjectId, setSavedProjectId] = useCurrentProject()
   const navigate = useNavigate()
+  // A project of another machine: the address keeps its machine.
+  const machineId = useMachineScope()?.machineId ?? null
+  const machineSearch = machineId ? { machineId } : {}
   // The picker makes the choice current and replaces the address.
   const chooseProject = (projectId: string): void => {
     setSavedProjectId(projectId)
-    void navigate({ to: "/science/analysis", search: { projectId }, replace: true })
+    void navigate({
+      to: "/science/analysis",
+      search: { ...machineSearch, projectId },
+      replace: true,
+    })
   }
   // A project given in the address wins and becomes the current one.
   useEffect(() => {

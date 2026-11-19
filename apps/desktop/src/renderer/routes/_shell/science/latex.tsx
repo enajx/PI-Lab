@@ -1,8 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { MachineScope } from "../../../machines/machines"
 import { ScienceLatex } from "./components/ScienceLatex"
 
 /** Search params of the LaTeX Editor route. */
 export interface LatexSearch {
+  /** The project's machine when it lives on another machine (every call goes there); absent for this Mac. */
+  machineId?: string
   /** Project to show; set by a dashboard project card or the Project Agents box. */
   projectId?: string
   /** An agent session to focus (from the Project Agents box or a notification). */
@@ -21,6 +24,7 @@ function text(value: unknown): string | undefined {
 /** LaTeX Editor science tab; `projectId` comes from a dashboard project card. */
 export const Route = createFileRoute("/_shell/science/latex")({
   validateSearch: (search: Record<string, unknown>): LatexSearch => ({
+    machineId: text(search.machineId),
     projectId: text(search.projectId),
     sessionId: text(search.sessionId),
     agentId: text(search.agentId),
@@ -31,15 +35,17 @@ export const Route = createFileRoute("/_shell/science/latex")({
 })
 
 function LatexRoute() {
-  const { projectId, sessionId, agentId, agentLabel, newPaper } = Route.useSearch()
+  const { machineId, projectId, sessionId, agentId, agentLabel, newPaper } = Route.useSearch()
   const focusSession =
     sessionId && agentId ? { sessionId, agentId, agentLabel: agentLabel ?? agentId } : null
   return (
-    <ScienceLatex
-      key={newPaper ? "new-paper" : (projectId ?? "default")}
-      initialProjectId={projectId}
-      newPaper={newPaper === true}
-      focusSession={focusSession}
-    />
+    <MachineScope machineId={machineId ?? null}>
+      <ScienceLatex
+        key={`${machineId ?? "local"}/${newPaper ? "new-paper" : (projectId ?? "default")}`}
+        initialProjectId={projectId}
+        newPaper={newPaper === true}
+        focusSession={focusSession}
+      />
+    </MachineScope>
   )
 }

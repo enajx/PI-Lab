@@ -1,4 +1,4 @@
-import { type PiLabDatabase, runMigrations } from "@pi-lab/local-db"
+import { type PiLabDatabase, resolveDbPath, runMigrationsWithCopy } from "@pi-lab/local-db"
 import dataFormat from "../../../release-data-format.json"
 import { resolveBundledMigrationsDir } from "./migrationsDir"
 
@@ -27,12 +27,14 @@ let dbHandle: PiLabDatabase | null = null
  * Open the local SQLite DB and apply migrations from a recognized journal.
  * Unknown states stop with a backup and visible error. Must run before any router that
  * touches the DB. Idempotent; the resolved path honors `PI_LAB_DATA_DIR`.
+ * Before pending migrations the database is copied to `local.db.pre-<build>`
+ * (a rollback to the previous version opens that copy).
  */
-export function initDatabase(): DbStatus {
+export function initDatabase(build: string): DbStatus {
   const migrationsFolder = resolveBundledMigrationsDir()
   // Pass the resolved folder explicitly — the bundled package's own default
   // resolves relative to the build output, which has no migrations.
-  const result = runMigrations(undefined, migrationsFolder)
+  const result = runMigrationsWithCopy(resolveDbPath(), migrationsFolder, build)
   dbHandle = result.db
   status = {
     appliedCount: result.appliedCount,

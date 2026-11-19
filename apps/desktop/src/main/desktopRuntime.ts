@@ -1,3 +1,4 @@
+import { homedir, hostname } from "node:os"
 import { join } from "node:path"
 import { resolveDataDir } from "@pi-lab/local-db/paths"
 import {
@@ -11,13 +12,25 @@ import {
   session,
 } from "electron"
 import { createIPCHandler } from "trpc-electron/main"
-import { readDiscovery, TOKEN_HEADER } from "../server/access"
+import { readDiscovery, readMachineId, TOKEN_HEADER } from "../server/access"
 import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
 import { INTERFACE_LANGUAGE_CHANNEL } from "../shared/interfaceLanguage"
+import { splitGrantHost } from "../shared/machineUrls"
 import type { QuickEditTarget } from "../shared/quickEdit"
 import { createDesktopRouter, desktopContext } from "./desktop/desktopRouter"
 import { getNativeLanguage, nativeText, saveNativeLanguage } from "./i18n/nativeLanguage"
 import { channelIdentity, type PiLabChannel } from "./identity/channel"
+import {
+  DEFAULT_REMOTE_APP_PATH,
+  DEFAULT_REMOTE_DATA_DIR,
+  DEFAULT_REMOTE_ENROLL_COMMAND,
+  DEFAULT_REMOTE_SERVER_PREFIX,
+  MachineConnections,
+  type RemoteAccess,
+} from "./machines/machineConnections"
+import { localServerAtStart } from "./machines/machineStore"
+import { PortForwards } from "./machines/portForwards"
+import { findServerBundle, type ServerBundleFiles } from "./machines/serverBundle"
 import { installNotebookFrameHeaders } from "./notebooks/notebookFrames"
 import { stopNotebooksWithWindow } from "./notebooks/notebookServers"
 import {
@@ -35,12 +48,14 @@ import {
   type EndpointCache,
   ensureServer,
   isPiLabServerProcess,
+  removeLaunchdAgent,
   SERVER_START_NO_PROGRESS_MS,
   type ServerEndpoint,
   ServerStartFailure,
   serverBuildId,
   serverLaunchConfig,
 } from "./server/launcher"
+import { SSH_PATH } from "./server/tunnel"
 import { MEDIA_SCHEME, REPORT_SCHEME } from "./trpc/science/analysis/mediaGrants"
 import { publicReleaseFromPackage } from "./updates/release"
 import type { QuitWork, RememberedQuitChoice } from "./window/userQuit"
@@ -58,6 +73,10 @@ interface AppSettings {
   quitChoice: RememberedQuitChoice
   editorVim: boolean
 }
+
+/** Why calls to the local server fail in a session started with "Local server: Off". */
+const LOCAL_SERVER_OFF_MESSAGE =
+  "This Mac's PI Lab server is off (Settings > Machines > Local server)."
 
 /** Notebook servers use this port range (see the server's NotebookServers). */
 const NOTEBOOK_PORTS = { start: 42_700, end: 42_799 }
@@ -87,6 +106,9 @@ export class DesktopRuntime {
   private readonly trayListeners = new Set<(snapshot: BackgroundTraySnapshot) => void>()
   private readonly unsubscribers: Array<() => void> = []
   private connecting: Promise<void> | null = null
+  private machineConnections: MachineConnections | null = null
+  /** Forwards to notebook servers on remote machines (created with the machines). */
+  private portForwards: PortForwards | null = null
 
   constructor(private readonly host: DesktopRuntimeHost) {
     this.ready = new Promise((resolve, reject) => {
@@ -105,6 +127,18 @@ export class DesktopRuntime {
   /** The server client once connected; rejects if the server could not start. */
   server(): Promise<ServerClient> {
     return this.ready
+  }
+
+  /** Remote machines (see machines/machineConnections.ts); created in start(). */
+  machines(): MachineConnections {
+    if (!this.machineConnections) throw new Error("Machines are not loaded yet")
+    return this.machineConnections
+  }
+
+  /** Local forwards to ports on remote machines; created in start(). */
+  forwards(): PortForwards {
+    if (!this.portForwards) throw new Error("Machines are not loaded yet")
+    return this.portForwards
   }
 
   /** The renderer's server address and token (asked over IPC by the preload). */
@@ -151,6 +185,12 @@ export class DesktopRuntime {
       router: createDesktopRouter({
         server: () => this.server(),
         rendererEndpoint: () => this.rendererEndpoint(),
+        machines: () => this.machines(),
+        forwards: () => this.forwards(),
+        sshConfigPath:
+          isTestMode && process.env.PI_LAB_TEST_SSH_CONFIG
+            ? process.env.PI_LAB_TEST_SSH_CONFIG
+            : join(homedir(), ".ssh", "config"),
       }),
       windows: [window],
       createContext: async () => desktopContext(this.brokers),
@@ -167,22 +207,67 @@ export class DesktopRuntime {
       }
     })
     this.installSchemeForwarding()
+    const profileDir = app.getPath("userData")
+    const mode = localServerAtStart(profileDir)
+    this.machineConnections = new MachineConnections({
+      profileDir,
+      access: remoteAccess(),
+      deviceName: `PI Lab on ${hostname()}`,
+      // With the local server off, the id it had (so it is still not added as a machine).
+      localMachineId: async () =>
+        mode === "off"
+          ? readMachineId(resolveDataDir())
+          : (await (await this.server()).server.hello.query()).machineId,
+      bundle: carriedServerBundle,
+      log: (message) => console.log(message),
+    })
+    if (isTestMode) {
+      ;(globalThis as { piLabTestMachines?: MachineConnections }).piLabTestMachines =
+        this.machineConnections
+    }
+    const machines = this.machineConnections
+    const forwards = new PortForwards(
+      remoteAccess(),
+      (machineId) => {
+        const machine = machines.list().find((entry) => entry.machineId === machineId)
+        if (!machine) throw new Error(`No machine ${machineId}`)
+        return machine.sshHost
+      },
+      (message) => console.log(message),
+    )
+    this.portForwards = forwards
+    // Notebook servers on another machine show here through a forwarded local port.
     installNotebookFrameHeaders(
-      (port) => port >= NOTEBOOK_PORTS.start && port <= NOTEBOOK_PORTS.end,
+      (port) =>
+        (port >= NOTEBOOK_PORTS.start && port <= NOTEBOOK_PORTS.end) || forwards.isForwarded(port),
       isAppPageUrl,
     )
     const window = this.host.initialWindow()
     if (window) this.boot(window)
+    // Only "Always" keeps the launchd agent: it would start the server at login.
+    const launchdLabel =
+      app.isPackaged && !isTestMode && process.platform === "darwin"
+        ? `${channelIdentity(this.host.channel).autostartName}.server`
+        : null
+    if (launchdLabel !== null && mode !== "always") removeLaunchdAgent(launchdLabel)
+    if (mode === "off") {
+      console.log("[pi-lab] local server is off; connecting to the added machines only")
+      this.rejectReady(new Error(LOCAL_SERVER_OFF_MESSAGE))
+      this.machineConnections.start()
+      return
+    }
     try {
-      this.connecting = this.connect()
+      this.connecting = this.connect(mode === "always" ? launchdLabel : null)
       await this.connecting
+      this.machineConnections.start()
     } catch (error) {
       this.rejectReady(error)
       throw error
     }
   }
 
-  private async connect(): Promise<void> {
+  /** launchdLabel: null starts the server as a detached child, which stops with the app's Quit. */
+  private async connect(launchdLabel: string | null): Promise<void> {
     const serverEntry = join(__dirname, "server.js")
     this.endpoint = await ensureServer({
       config: serverLaunchConfig({
@@ -196,10 +281,7 @@ export class DesktopRuntime {
         profileDir: app.getPath("userData"),
       }),
       serverEntry,
-      launchdLabel:
-        app.isPackaged && !isTestMode && process.platform === "darwin"
-          ? `${channelIdentity(this.host.channel).autostartName}.server`
-          : null,
+      launchdLabel,
       log: (message) => console.log(message),
       noProgressMs: SERVER_START_NO_PROGRESS_MS,
     })
@@ -316,20 +398,27 @@ export class DesktopRuntime {
   /**
    * Analysis reports and media stream from the server through the same token.
    * A request that cannot reach the server checks the endpoint again and is
-   * sent once more (the server may have restarted on another port).
+   * sent once more (the server may have restarted on another port). A host
+   * `<token>.<machineId>` is a grant of that machine's server, reached through
+   * its tunnel (shared/machineUrls.ts).
    */
   private installSchemeForwarding(): void {
     for (const scheme of [REPORT_SCHEME, MEDIA_SCHEME]) {
       session.defaultSession.protocol.handle(scheme, async (request) => {
-        await this.ready
         const url = new URL(request.url)
+        const { token: grant, machineId } = splitGrantHost(url.host)
+        // Only this Mac's grants need the local server; with Local server Off `ready` rejects.
+        if (machineId === null) await this.ready
         const headers: Record<string, string> = {}
         const range = request.headers.get("range")
         if (range) headers.range = range
         const forward = async () => {
-          const endpoint = await this.currentEndpoint()
+          const endpoint =
+            machineId === null
+              ? await this.currentEndpoint()
+              : await this.machines().httpEndpoint(machineId)
           return net.fetch(
-            `http://127.0.0.1:${endpoint.port}/scheme/${scheme}/${url.host}${url.pathname}`,
+            `http://127.0.0.1:${endpoint.port}/scheme/${scheme}/${grant}${url.pathname}`,
             { headers: { ...headers, [TOKEN_HEADER]: endpoint.token }, redirect: "error" },
           )
         }
@@ -358,6 +447,8 @@ export class DesktopRuntime {
    * runs recorded since the last activity change only show after this read.
    */
   async refreshTray(): Promise<BackgroundTraySnapshot> {
+    // No local server: the tray shows no projects.
+    if (localServerAtStart(app.getPath("userData")) === "off") return this.tray
     const snapshot = await (await this.server()).server.traySnapshot.query()
     this.tray = snapshot
     for (const listener of this.trayListeners) listener(snapshot)
@@ -404,6 +495,16 @@ export class DesktopRuntime {
     await client.server.stop.mutate({ stopAgents: true })
   }
 
+  /**
+   * True when Quit should also stop this Mac's server and agents: the app
+   * started a local server and "Local server" is now Only while PI Lab is
+   * open or Off.
+   */
+  stopsServerOnQuit(): boolean {
+    if (this.serverClient === null || this.machineConnections === null) return false
+    return this.machineConnections.deviceSettings().localServer !== "always"
+  }
+
   async quickPythonOptions(path: string) {
     return (await this.server()).server.quickPythonOptions.query({ path })
   }
@@ -426,6 +527,8 @@ export class DesktopRuntime {
    */
   async dispose(): Promise<void> {
     for (const unsubscribe of this.unsubscribers.splice(0)) unsubscribe()
+    await this.machineConnections?.close()
+    await this.portForwards?.close()
     if (isTestMode && process.env.PI_LAB_TEST_RETAIN_SERVER !== "1") await this.stopTestServer()
     const connection = this.serverClient
     connection?.close()
@@ -460,6 +563,44 @@ export class DesktopRuntime {
       process.kill(pid, "SIGKILL")
     }
   }
+}
+
+/**
+ * How remote machines are reached: the user's ssh and the defaults, or in
+ * test mode a test sshd (`PI_LAB_TEST_SSH_ARGS`, a JSON array), a temp remote
+ * data folder and a remote enroll command.
+ */
+function remoteAccess(): RemoteAccess {
+  const env = isTestMode ? process.env : {}
+  return {
+    sshPath: SSH_PATH,
+    extraSshArgs: env.PI_LAB_TEST_SSH_ARGS
+      ? (JSON.parse(env.PI_LAB_TEST_SSH_ARGS) as string[])
+      : [],
+    dataDir: env.PI_LAB_TEST_REMOTE_DATA_DIR ?? DEFAULT_REMOTE_DATA_DIR,
+    serverPrefix: env.PI_LAB_TEST_REMOTE_PREFIX ?? DEFAULT_REMOTE_SERVER_PREFIX,
+    appPath: env.PI_LAB_TEST_REMOTE_APP_PATH ?? DEFAULT_REMOTE_APP_PATH,
+    enrollCommand: env.PI_LAB_TEST_REMOTE_ENROLL ?? DEFAULT_REMOTE_ENROLL_COMMAND,
+    // Tests: no launchd agent, and the installed server runs in test mode.
+    installArgs: isTestMode ? ["--no-launchd"] : [],
+    installEnv: isTestMode ? { PI_LAB_TEST_MODE: "1" } : {},
+  }
+}
+
+/**
+ * The server bundle this app carries: `Resources/server-bundle/` in a
+ * packaged app, `release/server/` (from package-server-bundle.cjs) in source runs.
+ */
+function carriedServerBundle(): ServerBundleFiles | null {
+  if (app.isPackaged) {
+    const dir = join(process.resourcesPath, "server-bundle")
+    return findServerBundle(dir, join(dir, "install.sh"))
+  }
+  const desktopDir = join(__dirname, "..", "..")
+  return findServerBundle(
+    join(desktopDir, "release", "server"),
+    join(desktopDir, "scripts", "server-install", "install.sh"),
+  )
 }
 
 /** Decrypt a value the old app saved with safeStorage, or null when it cannot be read. */

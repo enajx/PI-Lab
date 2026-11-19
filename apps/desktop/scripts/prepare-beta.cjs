@@ -94,11 +94,23 @@ function digestFile(filename, algorithm) {
   return hash.digest(algorithm === "sha512" ? "base64" : "hex")
 }
 
-/** Release uploads deliberately exclude the app directory and DMG blockmap. */
-function assetNames(arch) {
+/**
+ * Release uploads deliberately exclude the app directory and DMG blockmap. The
+ * server bundle, its SHA-256 and install.sh are for machines without the app.
+ */
+function assetNames(arch, version) {
   if (!["arm64", "x64"].includes(arch)) throw new Error("Candidate architecture is invalid")
   const stem = `PI-Lab-${arch}`
-  return [`${stem}.dmg`, `${stem}.zip`, `${stem}.zip.blockmap`, "beta-mac.yml"]
+  const server = `pi-lab-server-${version}-darwin-${arch}.tar.gz`
+  return [
+    `${stem}.dmg`,
+    `${stem}.zip`,
+    `${stem}.zip.blockmap`,
+    "beta-mac.yml",
+    server,
+    `${server}.sha256`,
+    "install.sh",
+  ]
 }
 
 /** Bound release metadata and reject a redirected candidate directory. */
@@ -118,7 +130,7 @@ function verifyFeed(artifactDir, version, arch) {
   const feed = parseUpdateInfo(readMetadata(artifactDir, "beta-mac.yml"), "beta-mac.yml", {})
   if (feed.version !== version)
     throw new Error("Updater feed version does not match the Beta version")
-  const archives = assetNames(arch).slice(0, 2)
+  const archives = assetNames(arch, version).slice(0, 2)
   const zip = archives.find((name) => name.endsWith(".zip"))
   if (!Array.isArray(feed.files) || !feed.files.some(({ url }) => url === zip))
     throw new Error("Updater feed must reference the candidate ZIP")
@@ -157,7 +169,7 @@ function createBetaManifest(options) {
     throw new Error("Candidate must contain exactly one architecture ZIP")
   const arch = candidates[0]
   verifyFeed(artifactDir, version, arch)
-  const assets = assetNames(arch).map((name) => ({
+  const assets = assetNames(arch, version).map((name) => ({
     name,
     size: regularFile(join(artifactDir, name), MAX_ASSET_BYTES).size,
     sha256: digestFile(join(artifactDir, name), "sha256"),
@@ -192,7 +204,7 @@ function validateBetaManifest(artifactDir) {
   validateIdentity(version, commit, previousTag, repo)
   if (manifest.schemaVersion !== 1 || manifest.tag !== `v${version}`)
     throw new Error("Prepared Beta manifest identity is invalid")
-  const expected = assetNames(arch)
+  const expected = assetNames(arch, version)
   if (
     !Array.isArray(assets) ||
     assets.length !== expected.length ||

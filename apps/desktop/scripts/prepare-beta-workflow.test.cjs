@@ -36,6 +36,10 @@ test("Prepare Beta is manual, SSH-only, signs before checks, and creates only a 
     (step) => step.name === "Create draft Beta release",
   )
   assert.match(publishing.run, /prepare-beta\.cjs.*publish/)
+  // The server bundle, its SHA-256 and install.sh go to the release with the app.
+  const transfer = steps.find((step) => step.name === "Transfer checked release assets")
+  for (const name of ["pi-lab-server-*.tar.gz", "pi-lab-server-*.tar.gz.sha256", "install.sh"])
+    assert.ok(transfer.with.path.includes(`/${name}\n`), name)
   assert.ok(!text.includes("release edit"))
 })
 

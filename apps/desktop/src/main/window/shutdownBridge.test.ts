@@ -16,6 +16,7 @@ const electron = vi.hoisted(() => ({
   on: vi.fn(),
   removeListener: vi.fn(),
   send: vi.fn(),
+  sendSync: vi.fn(() => false),
 }))
 
 vi.mock("electron", () => ({
@@ -24,6 +25,7 @@ vi.mock("electron", () => ({
     on: electron.on,
     removeListener: electron.removeListener,
     send: electron.send,
+    sendSync: electron.sendSync,
   },
 }))
 vi.mock("trpc-electron/main", () => ({ ELECTRON_TRPC_CHANNEL: "electron-trpc" }))

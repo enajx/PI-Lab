@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
 import { chmodSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -10,6 +10,9 @@ import { join } from "node:path"
 export const TOKEN_FILE = "server-token"
 export const DISCOVERY_FILE = "server.json"
 
+/** Stable id of this server's machine, created once, owner-only. */
+export const MACHINE_ID_FILE = "machine-id"
+
 /** Header carrying the device token on plain HTTP requests. */
 export const TOKEN_HEADER = "x-pi-lab-token"
 
@@ -18,6 +21,9 @@ export const TOKEN_HEADER = "x-pi-lab-token"
  * `GET /identity?nonce=<hex>` answers `{ proof }` (see {@link identityProof}).
  */
 export const IDENTITY_PATH = "/identity"
+
+/** `POST` with a remote device's token revokes that device (204); the local token gets 403. */
+export const DEVICE_REVOKE_PATH = "/device/revoke"
 
 /** A nonce the server accepts: 32 to 128 lowercase hex characters. */
 export const IDENTITY_NONCE = /^[0-9a-f]{32,128}$/
@@ -48,6 +54,21 @@ export function assertOwnerOnly(path: string): void {
   if ((mode & 0o077) !== 0) {
     throw new Error(`${path} is readable by other users (mode ${mode.toString(8)}); expected 600`)
   }
+}
+
+/** Read this server's machine id, creating it on first start. */
+export function ensureMachineId(dataDir: string): string {
+  const path = join(dataDir, MACHINE_ID_FILE)
+  if (!existsSync(path)) writeOwnerOnly(path, `${randomUUID()}\n`)
+  assertOwnerOnly(path)
+  const id = readFileSync(path, "utf8").trim()
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error(`${path} does not hold a valid machine id`)
+  return id
+}
+
+/** This data folder's machine id, or null when no server ever started here. */
+export function readMachineId(dataDir: string): string | null {
+  return existsSync(join(dataDir, MACHINE_ID_FILE)) ? ensureMachineId(dataDir) : null
 }
 
 /** Read the local device token, creating it on first start. */
@@ -104,15 +125,42 @@ export function identityProof(token: string, nonce: string): string {
  * earlier answer) never gets it. Redirects are refused.
  */
 export async function proveServerIdentity(port: number, token: string): Promise<boolean> {
+  return checkIdentity(port, token, null)
+}
+
+/**
+ * The key a server proves a remote device's token with: the token's SHA-256
+ * (hex), which is all the server stores (`devices.json`).
+ */
+export function deviceProofKey(token: string): string {
+  return createHash("sha256").update(token).digest("hex")
+}
+
+/**
+ * True when the process on `port` (a remote server reached through a tunnel)
+ * proves it knows the token of device `deviceId`: it answers the HMAC of a new
+ * nonce keyed with {@link deviceProofKey}. A revoked or unknown device gets no
+ * proof. Clients call this before they send the token.
+ */
+export async function proveDeviceIdentity(
+  port: number,
+  deviceId: string,
+  token: string,
+): Promise<boolean> {
+  return checkIdentity(port, deviceProofKey(token), deviceId)
+}
+
+async function checkIdentity(port: number, key: string, deviceId: string | null): Promise<boolean> {
   const nonce = randomBytes(16).toString("hex")
-  const response = await fetch(`http://127.0.0.1:${port}${IDENTITY_PATH}?nonce=${nonce}`, {
+  const device = deviceId === null ? "" : `&device=${encodeURIComponent(deviceId)}`
+  const response = await fetch(`http://127.0.0.1:${port}${IDENTITY_PATH}?nonce=${nonce}${device}`, {
     redirect: "error",
     signal: AbortSignal.timeout(2_000),
   }).catch(() => null)
   if (!response?.ok) return false
   const body = (await response.json().catch(() => null)) as { proof?: unknown } | null
   if (typeof body?.proof !== "string") return false
-  const expected = Buffer.from(identityProof(token, nonce))
+  const expected = Buffer.from(identityProof(key, nonce))
   const presented = Buffer.from(body.proof)
   return expected.length === presented.length && timingSafeEqual(expected, presented)
 }

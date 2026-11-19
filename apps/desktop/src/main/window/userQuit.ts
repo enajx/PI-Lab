@@ -150,11 +150,14 @@ export function createStopServerAction(dependencies: StopServerDependencies): ()
 
 /**
  * Detail of the Quit dialog. Open notebook tabs are named: their servers stop
- * with the window, so the user can Cancel and save them first.
+ * with the window, so the user can Cancel and save them first. `stopsServer`:
+ * this Quit also stops the local server and its agents ("Local server" is not
+ * Always).
  */
-export function quitDialogDetail(notebooks: number): string {
-  const base =
-    "Projects, agents and routines keep running on the PI Lab server after you quit. Move to background also keeps the menu-bar icon."
+export function quitDialogDetail(notebooks: number, stopsServer: boolean): string {
+  const base = stopsServer
+    ? "This Mac's PI Lab server, its agents and routines stop when you quit (Settings > Machines > Local server). Move to background keeps them running with the menu-bar icon."
+    : "Projects, agents and routines keep running on the PI Lab server after you quit. Move to background also keeps the menu-bar icon."
   if (notebooks === 0) return base
   const line =
     notebooks === 1

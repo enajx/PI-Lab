@@ -12,6 +12,7 @@ import {
   PanelLeft,
   PanelLeftClose,
   Pencil,
+  Plus,
   Settings,
   Trash2,
   Waypoints,
@@ -21,6 +22,24 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { LatexText } from "../../../../components/LatexText"
 import { usePopupDismiss } from "../../../../components/usePopupDismiss"
 import { useInterfaceLanguage, useTranslate } from "../../../../i18n/language"
+import { localServerOff } from "../../../../machines/localServer"
+import { CONNECTION_LABELS, machineIcon } from "../../../../machines/MachineControls"
+import { MachineMenu, useShowMachineProjects } from "../../../../machines/MachineMenu"
+import {
+  MACHINES_REFRESH_MS,
+  type MachineProjects,
+  type MachineSummary,
+  showMachineUi,
+  useMachineState,
+  useMachines,
+  useRemoteProjects,
+  whileMachinesAdded,
+} from "../../../../machines/machines"
+import {
+  hiddenProjectCount,
+  RemoteProjectRows,
+  shownProjects,
+} from "../../../../machines/RemoteProjects"
 import {
   dismissNonGitNotice,
   SIDEBAR_MAX_WIDTH,
@@ -361,13 +380,21 @@ export function Sidebar() {
   const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const projectsQuery = useQuery(trpc.projects.list.queryOptions())
+  // "Local server: Off": no local projects (none are asked for).
+  const localOff = localServerOff()
+  const projectsQuery = useQuery({ ...trpc.projects.list.queryOptions(), enabled: !localOff })
+  const localProjects = localOff ? [] : projectsQuery.data
   const projectActivityStates = useProjectActivityStates()
-  const projects = projectsQuery.data ?? []
-  const hiddenCount =
-    projectsQuery.data === undefined
-      ? null
-      : projects.filter((project) => Boolean(project.archivedAt)).length
+  // Remote machines: their projects follow this Mac's, each with a machine label.
+  // Read again every few seconds while a machine is added, so the Machines group
+  // shows an update that is available or running also while Settings is closed.
+  const machineList = useMachines(whileMachinesAdded(MACHINES_REFRESH_MS))
+  const machines = machineList ?? []
+  const remote = useRemoteProjects(machines)
+  const routeParams = useParams({ strict: false }) as { machineId?: string; projectId?: string }
+  const projects = localProjects ?? []
+  // This Mac's hidden projects and the machines' (both show with Show hidden).
+  const hiddenCount = hiddenProjectCount(localProjects, machineList === null ? null : remote)
   const [collapsed, setCollapsed] = useSidebarCollapsed()
   const [width, setWidth] = useSidebarWidth()
   const [showFeatureHelp, setShowFeatureHelp] = useSidebarFeatureHelp()
@@ -400,6 +427,16 @@ export function Sidebar() {
     }),
   )
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null)
+  // The Machines group's right-click menu: which machine, at the pointer.
+  const [machineMenu, setMachineMenu] = useState<{
+    machineId: string
+    x: number
+    y: number
+  } | null>(null)
+  const machineMenuEntry =
+    machineMenu === null
+      ? null
+      : (remote.find((entry) => entry.machine.machineId === machineMenu.machineId) ?? null)
   // The project whose Edit project dialog is open (the same dialog as the Dashboard card).
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
   const editingProject = projects.find((project) => project.id === editingProjectId) ?? null
@@ -429,7 +466,7 @@ export function Sidebar() {
 
   // `projects.list` returns the saved project order, the one the Dashboard cards use too.
   const reorderProjects = useProjectReorder((message) => setActionError(message))
-  const orderedProjects = projects.filter((project) => showHidden || !project.archivedAt)
+  const orderedProjects = shownProjects(projects, showHidden)
   const projectRowProps = useDragReorder(
     orderedProjects.map((project) => project.id),
     reorderProjects,
@@ -491,7 +528,7 @@ export function Sidebar() {
               {t("Projects")}
             </Link>
           )}
-          {orderedProjects.length === 0 ? (
+          {orderedProjects.length === 0 && remote.every((entry) => entry.projects.length === 0) ? (
             collapsed ? null : (
               <p
                 data-testid="projects-empty"
@@ -522,6 +559,20 @@ export function Sidebar() {
               />
             ))
           )}
+          {remote.map((entry) => (
+            <RemoteProjectRows
+              key={entry.machine.machineId}
+              machine={entry.machine}
+              projects={entry.projects}
+              collapsed={collapsed}
+              showHidden={showHidden}
+              activeProjectId={
+                routeParams.machineId === entry.machine.machineId
+                  ? (routeParams.projectId ?? null)
+                  : null
+              }
+            />
+          ))}
           <ProjectVisibilityToggle
             hiddenCount={hiddenCount ?? 0}
             showHidden={showHidden}
@@ -531,6 +582,12 @@ export function Sidebar() {
             onToggle={() => setShowHidden(!showHidden)}
           />
         </nav>
+
+        <MachinesNav
+          remote={remote}
+          collapsed={collapsed}
+          onMenu={(machineId, x, y) => setMachineMenu({ machineId, x, y })}
+        />
 
         {!collapsed && showFeatureHelp ? (
           <FeatureHelpPanel onHide={() => setShowFeatureHelp(false)} />
@@ -573,10 +630,22 @@ export function Sidebar() {
         }}
       />
 
+      {machineMenu !== null && machineMenuEntry !== null ? (
+        <MachineMenu
+          key={machineMenu.machineId}
+          machine={machineMenuEntry.machine}
+          projectCount={shownProjects(machineMenuEntry.projects, showHidden).length}
+          position={{ x: machineMenu.x, y: machineMenu.y }}
+          onClose={() => setMachineMenu(null)}
+          onError={setActionError}
+        />
+      ) : null}
+
       {editingProject ? (
         <EditProjectDialog
           project={editingProject}
           mode="edit"
+          canPickPaperFolder
           pending={updateDetails.isPending}
           error={updateDetails.error?.message ?? null}
           onClose={() => setEditingProjectId(null)}
@@ -1113,6 +1182,111 @@ function SettingsNav({ collapsed }: { collapsed: boolean }) {
 }
 
 /**
+ * One machine in the sidebar's Machines group: an icon with its connection
+ * state ({@link machineIcon}) and its name. A click shows its projects on the
+ * Projects Dashboard; a right click opens its menu.
+ */
+function MachineNavRow({
+  machine,
+  collapsed,
+  onMenu,
+}: {
+  machine: MachineSummary
+  collapsed: boolean
+  onMenu: (x: number, y: number) => void
+}) {
+  const t = useTranslate()
+  const state = useMachineState(machine.machineId)
+  const showProjects = useShowMachineProjects()
+  const icon = machineIcon(state, machine.updating)
+  return (
+    <button
+      type="button"
+      data-testid="sidebar-machine"
+      data-machine-id={machine.machineId}
+      data-state={state}
+      data-icon={icon.name}
+      title={`${machine.name} · ${t(CONNECTION_LABELS[state])}`}
+      data-feature-label={machine.name}
+      data-feature-help={`${machine.sshHost} · ${t(CONNECTION_LABELS[state])}. ${t("Click to show its projects on the Projects Dashboard; right-click for more.")}`}
+      onClick={() => showProjects(machine.machineId)}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        onMenu(event.clientX, event.clientY)
+      }}
+      className={cn(navRowClass, "text-start", collapsed && "justify-center", navStateClass(false))}
+    >
+      <icon.Icon
+        className={cn(
+          "size-4 shrink-0",
+          state === "disconnected" ? "text-muted-foreground" : "text-sidebar-foreground",
+        )}
+        aria-hidden
+      />
+      {collapsed ? (
+        <span className="sr-only">{machine.name}</span>
+      ) : (
+        <span className="flex-1 truncate">{machine.name}</span>
+      )}
+    </button>
+  )
+}
+
+/**
+ * The remote machines this app connects to, with an add action (Settings >
+ * Machines). Shown once a machine is added; the first one is added in Settings.
+ */
+function MachinesNav({
+  remote,
+  collapsed,
+  onMenu,
+}: {
+  remote: MachineProjects[]
+  collapsed: boolean
+  onMenu: (machineId: string, x: number, y: number) => void
+}) {
+  const t = useTranslate()
+  const { location } = useRouterState()
+  if (!showMachineUi(remote.map((entry) => entry.machine))) return null
+  return (
+    <nav
+      aria-label={t("Machines")}
+      data-testid="sidebar-machines"
+      className="flex shrink-0 flex-col gap-0.5 border-sidebar-border border-t pt-2"
+    >
+      {collapsed ? null : (
+        <div className="flex items-center justify-between px-2 pb-1">
+          <span className="font-medium text-panel-title text-xs uppercase tracking-wide">
+            {t("Machines")}
+          </span>
+          <Link
+            to="/settings"
+            search={{ section: "machines" }}
+            data-testid="sidebar-add-machine"
+            aria-label={t("Add machine")}
+            title={t("Add machine")}
+            data-feature-label={t("Add machine")}
+            data-feature-help={t("Connect to the PI Lab server on another computer over SSH.")}
+            onClick={() => rememberSettingsReturnRoute(location)}
+            className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <Plus className="size-3.5" aria-hidden />
+          </Link>
+        </div>
+      )}
+      {remote.map(({ machine }) => (
+        <MachineNavRow
+          key={machine.machineId}
+          machine={machine}
+          collapsed={collapsed}
+          onMenu={(x, y) => onMenu(machine.machineId, x, y)}
+        />
+      ))}
+    </nav>
+  )
+}
+
+/**
  * A single project row that links to its route and highlights when active. When
  * the sidebar is collapsed it renders an icon-sized thumbnail or first-letter badge with a
  * `title` tooltip carrying the full name; expanded it keeps that same badge beside the name and is
@@ -1136,8 +1310,8 @@ function ProjectItem({
 }) {
   const t = useTranslate()
   const toDisplayPath = useDisplayPath()
-  const params = useParams({ strict: false }) as { projectId?: string }
-  const isActive = params.projectId === project.id
+  const params = useParams({ strict: false }) as { machineId?: string; projectId?: string }
+  const isActive = params.machineId === undefined && params.projectId === project.id
   const navigate = useNavigate()
   const [sessionsExpanded, setSessionsExpanded] = useState(true)
   const agentSessions = workspaceState?.sessions.filter((session) => session.kind === "agent") ?? []

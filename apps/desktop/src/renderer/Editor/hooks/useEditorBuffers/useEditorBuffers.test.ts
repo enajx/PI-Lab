@@ -847,3 +847,44 @@ test("a save with no reply from the server marks the tab not saved and keeps the
     { relPath: "notes.txt", dirty: false, notSaved: false },
   ])
 })
+
+/** A restored tab waits for its workspace: a slow `ensureMain` (a project on another machine) must not reload with an empty id (mocked IPC). */
+test("restored tabs reload their file once the workspace id arrives (mocked IPC)", async () => {
+  vi.useFakeTimers()
+  const stat = vi.fn((input: unknown) => {
+    if (!(input as { workspaceId: string }).workspaceId) throw new Error("too_small workspaceId")
+    return { exists: true, mtimeMs: 2, size: 4 }
+  })
+  const client = createFakeTrpcClient({
+    "python.resolve": () => null,
+    "files.stat": stat,
+    "files.read": () => ({
+      status: "text",
+      exists: true,
+      content: "disk",
+      baseline: { mtimeMs: 2, size: 4 },
+    }),
+  })
+  const view = renderHook(
+    ({ workspaceId }) =>
+      useEditorBuffers({
+        client,
+        workspaceId,
+        initialBuffers: [initial],
+        initialActiveRelPath: initial.relPath,
+        settings: { ...DEFAULT_EDITOR_SETTINGS, diagnosticsEnabled: false, autosave: false },
+      }),
+    { initialProps: { workspaceId: "" } },
+  )
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3_000)
+  })
+  expect(view.result.current.error).toBeNull()
+  expect(stat).not.toHaveBeenCalled()
+  view.rerender({ workspaceId: "remote-main" })
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_500)
+  })
+  expect(view.result.current.error).toBeNull()
+  expect(view.result.current.active).toMatchObject({ content: "disk", savedContent: "disk" })
+})

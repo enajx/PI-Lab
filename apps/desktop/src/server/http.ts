@@ -6,8 +6,15 @@ import { type WebSocket, WebSocketServer } from "ws"
 import type { AppContext } from "../main/trpc/context"
 import { serverRouter } from "../main/trpc/serverRouter"
 import { ConnectionFlow, type ConnectionFlowStats } from "../main/trpc/terminal/outputFlow"
-import { IDENTITY_NONCE, IDENTITY_PATH, identityProof, TOKEN_HEADER } from "./access"
-import type { DeviceAccess } from "./devices"
+import {
+  DEVICE_REVOKE_PATH,
+  IDENTITY_NONCE,
+  IDENTITY_PATH,
+  identityProof,
+  TOKEN_HEADER,
+} from "./access"
+import { type DeviceAccess, LOCAL_DEVICE_ID } from "./devices"
+import { DOWNLOAD_PATH, handleDownload, handleUpload, UPLOAD_PATH } from "./transfers"
 
 export { TOKEN_HEADER }
 
@@ -98,7 +105,8 @@ async function sendResponse(response: Response, out: ServerResponse): Promise<vo
 
 /**
  * `GET /scheme/<scheme>/<host>/<path>` serves what Electron's protocol handler
- * forwards. Everything needs the device token, except `GET /identity`, which
+ * forwards; `GET /files/download` and `PUT /files/upload` move project files
+ * for clients on other machines (transfers.ts). Everything needs the device token, except `GET /identity`, which
  * answers the HMAC of the client's nonce with the token, so a client can check
  * the port before it sends the token.
  */
@@ -117,13 +125,31 @@ async function handleHttp(
       out.writeHead(400).end()
       return
     }
+    // With `device=<id>`, the proof is keyed with that remote device's token hash.
+    const deviceId = requested.searchParams.get("device")
+    const key = deviceId === null ? options.localToken : options.access.proofKey(deviceId)
+    if (key === null) {
+      out.writeHead(404).end()
+      return
+    }
     out
       .writeHead(200, { "content-type": "application/json" })
-      .end(JSON.stringify({ proof: identityProof(options.localToken, nonce) }))
+      .end(JSON.stringify({ proof: identityProof(key, nonce) }))
     return
   }
-  if (!options.access.authenticate(request.headers[TOKEN_HEADER]?.toString() ?? null)) {
+  const deviceId = options.access.authenticate(request.headers[TOKEN_HEADER]?.toString() ?? null)
+  if (!deviceId) {
     out.writeHead(401).end()
+    return
+  }
+  // A remote device revokes its own token (the client's "Remove machine").
+  if (request.method === "POST" && path === DEVICE_REVOKE_PATH) {
+    if (deviceId === LOCAL_DEVICE_ID) {
+      out.writeHead(403).end()
+      return
+    }
+    options.access.revoke(deviceId)
+    out.writeHead(204).end()
     return
   }
   if (path === "/health") {
@@ -139,6 +165,14 @@ async function handleHttp(
     out
       .writeHead(200, { "content-type": "application/json" })
       .end(JSON.stringify(connectionStats()))
+    return
+  }
+  if (request.method === "GET" && path === DOWNLOAD_PATH) {
+    await handleDownload(options.createContext(), requested, out)
+    return
+  }
+  if (request.method === "PUT" && path === UPLOAD_PATH) {
+    await handleUpload(options.createContext(), requested, request, out)
     return
   }
   if (!path.startsWith(SCHEME_PATH_PREFIX)) {

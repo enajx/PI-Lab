@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { MigrationFailure } from "@pi-lab/local-db"
+import { getSettingsOrDefaults, MigrationFailure } from "@pi-lab/local-db"
+import { getDb } from "../main/db/db"
 import { isTestMode } from "../main/runtime/env"
 import {
   analysisMedia,
@@ -18,6 +19,7 @@ import {
 import { readServerConfig } from "./config"
 import { listen } from "./http"
 import { ServerRuntime } from "./runtime"
+import { RELEASES_URL, ServerSelfUpdate } from "./selfUpdate"
 import { writeStartStep } from "./startProgress"
 
 /**
@@ -49,10 +51,12 @@ async function main(): Promise<void> {
   const runtime = new ServerRuntime(config)
   await runtime.start((step) => writeStartStep(config.dataDir, step))
 
+  let selfUpdate: ServerSelfUpdate | null = null
   let stopping = false
   const stop = (code: number): void => {
     if (stopping) return
     stopping = true
+    selfUpdate?.stop()
     rmSync(join(config.dataDir, DISCOVERY_FILE), { force: true })
     void server
       .close()
@@ -87,6 +91,19 @@ async function main(): Promise<void> {
     serverId,
   })
   console.log(`[pi-lab server] listening on 127.0.0.1:${server.port} (pid ${process.pid})`)
+
+  // Test mode checks for updates only against a local feed the test serves.
+  const testReleasesUrl = process.env.PI_LAB_TEST_SERVER_RELEASES_URL?.trim()
+  if (!isTestMode || testReleasesUrl) {
+    selfUpdate = new ServerSelfUpdate({
+      config,
+      channel: () => getSettingsOrDefaults(getDb()).publicUpdateChannel,
+      releasesUrl: testReleasesUrl || RELEASES_URL,
+      startDelayMs: isTestMode ? 0 : 10_000,
+      log: (message) => console.log(message),
+    })
+    selfUpdate.start()
+  }
 
   process.on("SIGTERM", () => stop(0))
   process.on("SIGINT", () => stop(0))

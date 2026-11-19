@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import type { DocumentTool } from "../../../main/documents/tools"
 import { useTranslate } from "../../i18n/language"
+import { useMachineScope } from "../../machines/machines"
 import { useTRPC } from "../../trpc/react"
 
 /**
@@ -179,6 +180,8 @@ export function RenderedDocument({
   const t = useTranslate()
   const trpc = useTRPC()
   const openInBrowser = useMutation(trpc.documents.openInBrowser.mutationOptions())
+  // The rendered file is on another machine: this Mac's browser cannot open it.
+  const onAnotherMachine = useMachineScope() !== null
   const outputRelPath = result.ok ? result.outputRelPath : null
   return (
     <div data-testid="document-rendered" className="flex h-full min-h-0 flex-col">
@@ -192,7 +195,7 @@ export function RenderedDocument({
             {t("Render failed. See the build log.")}
           </span>
         )}
-        {outputRelPath ? (
+        {outputRelPath && !onAnotherMachine ? (
           <Button
             type="button"
             size="sm"

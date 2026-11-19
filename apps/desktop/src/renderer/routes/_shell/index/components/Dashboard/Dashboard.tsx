@@ -21,7 +21,24 @@ import { useNavigate } from "@tanstack/react-router"
 import { type ComponentProps, useCallback, useEffect, useRef, useState } from "react"
 import { CardGrid, ResizableCardGridItem } from "../../../../../components/CardGrid"
 import { useTranslate } from "../../../../../i18n/language"
-import { useShowHiddenProjects, useSidebarCollapsed } from "../../../../../preferences/preferences"
+import { localServerOff } from "../../../../../machines/localServer"
+import {
+  effectiveFilter,
+  filterShows,
+  MachineFilter,
+} from "../../../../../machines/MachineControls"
+import { showMachineUi, useMachines, useRemoteProjects } from "../../../../../machines/machines"
+import { projectRoute } from "../../../../../machines/projectRoute"
+import {
+  hiddenProjectCount,
+  RemoteProjectCards,
+  shownProjects,
+} from "../../../../../machines/RemoteProjects"
+import {
+  useMachineFilter,
+  useShowHiddenProjects,
+  useSidebarCollapsed,
+} from "../../../../../preferences/preferences"
 import { useTRPC } from "../../../../../trpc/react"
 import { useAddProjectController } from "../../../components/AddProjectController"
 import { AddProjectMenu } from "../../../components/AddProjectMenu"
@@ -74,7 +91,7 @@ function SortableProjectCard({ project }: { project: DashboardProject }) {
       )}
       style={{ transform: CSS.Translate.toString(transform), transition }}
     >
-      <ProjectCard project={project} />
+      <ProjectCard project={project} machine={null} />
     </ResizableCardGridItem>
   )
 }
@@ -96,16 +113,28 @@ export function Dashboard() {
   const { openAddProject } = useAddProjectController()
   const trayRequestHandled = useRef(false)
   const queryClient = useQueryClient()
-  const projectsQuery = useQuery(trpc.projects.list.queryOptions())
+  // "Local server: Off": no local projects (none are asked for).
+  const localOff = localServerOff()
+  const projectsQuery = useQuery({ ...trpc.projects.list.queryOptions(), enabled: !localOff })
+  const localProjects = localOff ? [] : projectsQuery.data
   const [collapsed] = useSidebarCollapsed()
+  // Remote machines: their projects follow this Mac's, each with a machine label.
+  const machineList = useMachines(false)
+  const machines = machineList ?? []
+  const remote = useRemoteProjects(machines)
+  const [machineFilterValue, setMachineFilter] = useMachineFilter()
+  const machineFilter = effectiveFilter(machineFilterValue, machines)
+  const showLocal = filterShows(machineFilter, null)
 
-  const projects = projectsQuery.data ?? []
-  const hiddenCount =
-    projectsQuery.data === undefined
-      ? null
-      : projects.filter((project) => Boolean(project.archivedAt)).length
+  const projects = localProjects ?? []
+  // The machines the filter shows. Their hidden projects and this Mac's (when shown) count for Show hidden.
+  const shownRemote = remote.filter((entry) => filterShows(machineFilter, entry.machine.machineId))
+  const hiddenCount = hiddenProjectCount(
+    showLocal ? localProjects : [],
+    machineList === null ? null : shownRemote,
+  )
   const [showHidden, setShowHidden] = useShowHiddenProjects(hiddenCount)
-  const visibleProjects = showHidden ? projects : projects.filter((project) => !project.archivedAt)
+  const visibleProjects = showLocal ? shownProjects(projects, showHidden) : []
   const [reorderError, setReorderError] = useState<string | null>(null)
   const reorderProjects = useProjectReorder(setReorderError)
   const sensors = useSensors(
@@ -135,9 +164,9 @@ export function Dashboard() {
     if (!search || !new URLSearchParams(search).has("newProject")) return
     trayRequestHandled.current = true
     openAddProject({
-      onAdded: (project) => {
-        void invalidateProjects()
-        void navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
+      onAdded: (project, machineId) => {
+        if (machineId === null) void invalidateProjects()
+        void navigate(projectRoute(machineId, project.id))
       },
     })
     const cleanHash = window.location.hash.split("?", 1)[0]
@@ -154,6 +183,15 @@ export function Dashboard() {
       >
         <h1 className="text-foreground text-sm tracking-tight">{t("Projects Dashboard")}</h1>
         <div className={cn("flex shrink-0 items-center gap-3", titleBarControlClass(collapsed))}>
+          {showMachineUi(machines) ? (
+            <MachineFilter
+              machines={machines}
+              value={machineFilter}
+              onChange={setMachineFilter}
+              testId="dashboard-machine-filter"
+              className=""
+            />
+          ) : null}
           <ProjectVisibilityToggle
             hiddenCount={hiddenCount ?? 0}
             showHidden={showHidden}
@@ -167,7 +205,7 @@ export function Dashboard() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-12 pb-6">
         {/* With no projects the New project card alone is shown, with no text above it. */}
-        {projects.length > 0 && visibleProjects.length === 0 ? (
+        {showLocal && projects.length > 0 && visibleProjects.length === 0 ? (
           <p
             data-testid="dashboard-empty"
             className="text-muted-foreground text-sm leading-relaxed"
@@ -187,7 +225,7 @@ export function Dashboard() {
         <CardGrid
           surface="dashboard"
           cardIds={
-            projectsQuery.data === undefined ? null : visibleProjects.map((project) => project.id)
+            localProjects === undefined ? null : visibleProjects.map((project) => project.id)
           }
           testId="dashboard-grid"
           className="gap-6"
@@ -199,7 +237,20 @@ export function Dashboard() {
               ))}
             </SortableContext>
           </DndContext>
-          <AddProjectMenu variant="dashboard-card" onAdded={() => void invalidateProjects()} />
+          {shownRemote.map((entry) => (
+            <RemoteProjectCards
+              key={entry.machine.machineId}
+              machine={entry.machine}
+              projects={entry.projects}
+              showHidden={showHidden}
+            />
+          ))}
+          <AddProjectMenu
+            variant="dashboard-card"
+            onAdded={(_project, machineId) => {
+              if (machineId === null) void invalidateProjects()
+            }}
+          />
         </CardGrid>
       </div>
     </div>

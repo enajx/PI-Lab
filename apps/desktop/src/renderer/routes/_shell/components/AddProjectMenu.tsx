@@ -1,30 +1,48 @@
 import type { Project, ProjectDetails } from "@pi-lab/local-db"
 import { Button, cn } from "@pi-lab/ui"
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { FilePlus2, FolderOpen, FolderPlus, GitFork, Plus, X } from "lucide-react"
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react"
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react"
 import { createPortal } from "react-dom"
 import { usePopupDismiss } from "../../../components/usePopupDismiss"
 import { translateKnownError } from "../../../i18n/errors"
 import { useInterfaceLanguage, useTranslate } from "../../../i18n/language"
+import { localServerOff } from "../../../machines/localServer"
+import {
+  MachineScope,
+  showMachineUi,
+  useDeviceMachineSettings,
+  useMachines,
+} from "../../../machines/machines"
 import { useTRPC } from "../../../trpc/react"
 import { EditProjectDialog } from "../index/components/ProjectCard/EditProjectDialog"
+
+/** `machineId`: the machine the project was created on (null: this Mac). */
+export type OnAdded = (project: Project, machineId: string | null) => void
 
 type AddProjectMenuProps =
   | {
       variant: "sidebar"
       collapsed: boolean
-      onAdded: (project: Project) => void
+      onAdded: OnAdded
     }
   | {
       variant: "dashboard-card"
-      onAdded: (project: Project) => void
+      onAdded: OnAdded
     }
   | {
       variant: "global"
       open: boolean
       onOpenChange: (open: boolean) => void
-      onAdded: (project: Project) => void
+      onAdded: OnAdded
     }
 
 type PendingProject =
@@ -46,14 +64,118 @@ const WINDOW_MARGIN = 8
  * Shared Add Project chooser for every entry point. It owns the three creation
  * flows, loading state, error surface, and close/reset behavior so Dashboard and
  * Sidebar never drift into separate project-creation experiences.
+ *
+ * Once a machine is added, a machine picker (preset to this device's default
+ * machine) chooses where the project is created: the flows below run against
+ * that machine's server (MachineScope). The native folder dialog only browses
+ * this Mac, so for another machine folders are typed as paths on it.
  */
 export function AddProjectMenu(props: AddProjectMenuProps) {
   const t = useTranslate()
+  const queryClient = useQueryClient()
+  const machines = useMachines(false) ?? []
+  const settings = useDeviceMachineSettings()
+  const [localOpen, setLocalOpen] = useState(false)
+  const [clickAnchor, setClickAnchor] = useState<Point | null>(null)
+  // The machine picked in this opening of the menu; undefined: the preset.
+  const [picked, setPicked] = useState<string | null | undefined>(undefined)
+  const global = props.variant === "global"
+  const controlledOpen = global ? props.open : null
+  const onControlledOpenChange = global ? props.onOpenChange : null
+  const open = controlledOpen ?? localOpen
+  const setOpen = useCallback(
+    (next: boolean): void => {
+      if (!next) setPicked(undefined)
+      if (onControlledOpenChange) {
+        onControlledOpenChange(next)
+        return
+      }
+      setLocalOpen(next)
+    },
+    [onControlledOpenChange],
+  )
+  const showPicker = showMachineUi(machines)
+  const choices: Array<string | null> = [
+    ...(localServerOff() ? [] : [null]),
+    ...machines.map((machine) => machine.machineId),
+  ]
+  const preset = choices.includes(settings?.defaultMachine ?? null)
+    ? (settings?.defaultMachine ?? null)
+    : (choices[0] ?? null)
+  const machineId = showPicker ? (picked === undefined ? preset : picked) : null
+  const picker = showPicker ? (
+    <label className="flex items-center justify-between gap-2 px-2 py-1 text-muted-foreground text-xs">
+      <span>{t("Machine")}</span>
+      <select
+        data-testid="add-project-machine"
+        aria-label={t("Machine")}
+        data-feature-label={t("Machine")}
+        data-feature-help={t("The machine the new project is created on.")}
+        value={machineId ?? "local"}
+        onChange={(event) => setPicked(event.target.value === "local" ? null : event.target.value)}
+        className="h-7 min-w-0 rounded-md border border-border bg-background px-1.5 text-foreground text-xs"
+      >
+        {choices.map((choice) => (
+          <option key={choice ?? "local"} value={choice ?? "local"}>
+            {choice === null
+              ? t("This Mac")
+              : (machines.find((machine) => machine.machineId === choice)?.name ?? choice)}
+          </option>
+        ))}
+      </select>
+    </label>
+  ) : null
+  const onAdded = (project: Project) => {
+    if (machineId !== null) {
+      void queryClient.invalidateQueries({ queryKey: ["machine-projects", machineId] })
+    }
+    props.onAdded(project, machineId)
+  }
+  // Keyed by machine: another machine starts the chooser again on its own server.
+  return (
+    <MachineScope machineId={machineId}>
+      <AddProjectMenuBody
+        key={machineId ?? "local"}
+        props={props}
+        open={open}
+        setOpen={setOpen}
+        clickAnchor={clickAnchor}
+        setClickAnchor={setClickAnchor}
+        remote={machineId !== null}
+        picker={picker}
+        onAdded={onAdded}
+      />
+    </MachineScope>
+  )
+}
+
+function AddProjectMenuBody({
+  props,
+  open,
+  setOpen,
+  clickAnchor,
+  setClickAnchor,
+  remote,
+  picker,
+  onAdded,
+}: {
+  props: AddProjectMenuProps
+  open: boolean
+  setOpen: (next: boolean) => void
+  clickAnchor: Point | null
+  setClickAnchor: (next: Point | null) => void
+  /** The project is created on another machine: folders are typed paths there. */
+  remote: boolean
+  picker: ReactNode
+  onAdded: (project: Project) => void
+}) {
+  const t = useTranslate()
   const [language] = useInterfaceLanguage()
   const trpc = useTRPC()
-  const [localOpen, setLocalOpen] = useState(false)
   const [setup, setSetup] = useState<PendingProject | null>(null)
-  const [mode, setMode] = useState<"menu" | "clone" | "template">("menu")
+  const [mode, setMode] = useState<"menu" | "clone" | "template" | "folder-path">("menu")
+  // A folder on the other machine: the project folder, or the clone's parent folder.
+  const [remotePath, setRemotePath] = useState("")
   const [highlight, setHighlight] = useState(0)
   const [url, setUrl] = useState("")
   const [templateName, setTemplateName] = useState("")
@@ -64,8 +186,6 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
   const [previewFilePath, setPreviewFilePath] = useState<string | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
-  // Where the Dashboard card was clicked; null for keyboard activation.
-  const [clickAnchor, setClickAnchor] = useState<Point | null>(null)
   const [anchorPlacement, setAnchorPlacement] = useState<Point | null>(null)
   const selectMenuItemRef = useRef<(index: number) => void>(() => {})
   const previewDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -75,24 +195,11 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
   const global = props.variant === "global"
   const templateDialog = mode === "template"
   const anchored = dashboardCard && clickAnchor !== null && !templateDialog
-  const controlledOpen = global ? props.open : null
-  const onControlledOpenChange = global ? props.onOpenChange : null
-  const open = controlledOpen ?? localOpen
-  const setOpen = useCallback(
-    (next: boolean): void => {
-      if (onControlledOpenChange) {
-        onControlledOpenChange(next)
-        return
-      }
-      setLocalOpen(next)
-    },
-    [onControlledOpenChange],
-  )
 
   const onSuccess = (project: Project) => {
     setSetup(null)
     setOpen(false)
-    props.onAdded(project)
+    onAdded(project)
   }
   const pickDirectory = useMutation(trpc.system.pickDirectory.mutationOptions())
   const openProject = useMutation(trpc.projects.add.mutationOptions({ onSuccess }))
@@ -166,6 +273,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
     setMode("menu")
     setHighlight(0)
     setUrl("")
+    setRemotePath("")
     setTemplateName("")
     setTemplateParentPath("")
     setTemplateFiles([])
@@ -184,6 +292,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
     openProject.reset,
     cloneProject.reset,
     templateProject.reset,
+    setClickAnchor,
   ])
 
   useEffect(() => {
@@ -227,41 +336,52 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
     }
   }, [global, highlight, mode, open, setOpen, setup])
 
+  const addFolder = (path: string) => {
+    openProject.mutate({
+      path,
+      details: {
+        name: path.split(/[\\/]/).filter(Boolean).at(-1) ?? path,
+        typeId: "general",
+        deadline: null,
+        agentId: null,
+        emojiTags: [],
+        textTags: [],
+      },
+    })
+  }
   const openFromFolder = () => {
+    if (remote) {
+      setMode("folder-path")
+      return
+    }
     pickDirectory.mutate(undefined, {
       onSuccess: (path) => {
-        if (!path) return
-        openProject.mutate({
-          path,
-          details: {
-            name: path.split(/[\\/]/).filter(Boolean).at(-1) ?? path,
-            typeId: "general",
-            deadline: null,
-            agentId: null,
-            emojiTags: [],
-            textTags: [],
-          },
-        })
+        if (path) addFolder(path)
       },
     })
   }
   const submitClone = () => {
     const trimmed = url.trim()
     if (!trimmed) return
+    const clone = (parentDir: string) =>
+      setSetup({
+        kind: "clone",
+        url: trimmed,
+        parentDir,
+        name:
+          trimmed
+            .replace(/[\\/]+$/, "")
+            .split(/[\\/:]/)
+            .at(-1)
+            ?.replace(/\.git$/i, "") ?? "",
+      })
+    if (remote) {
+      if (remotePath.trim()) clone(remotePath.trim())
+      return
+    }
     pickDirectory.mutate(undefined, {
       onSuccess: (parentDir) => {
-        if (parentDir)
-          setSetup({
-            kind: "clone",
-            url: trimmed,
-            parentDir,
-            name:
-              trimmed
-                .replace(/[\\/]+$/, "")
-                .split(/[\\/:]/)
-                .at(-1)
-                ?.replace(/\.git$/i, "") ?? "",
-          })
+        if (parentDir) clone(parentDir)
       },
     })
   }
@@ -469,6 +589,41 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                   {t("New/Add Project")}
                 </p>
               ) : null}
+              {mode === "menu" ? picker : null}
+
+              {mode === "folder-path" ? (
+                <form
+                  className="flex flex-col gap-2 p-1.5"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    if (remotePath.trim() && !pending) addFolder(remotePath.trim())
+                  }}
+                >
+                  <label
+                    className="font-medium text-muted-foreground text-xs"
+                    htmlFor={`${labelId}-path`}
+                  >
+                    {t("Folder on that machine")}
+                  </label>
+                  <input
+                    id={`${labelId}-path`}
+                    data-testid="add-project-remote-path"
+                    type="text"
+                    value={remotePath}
+                    onChange={(event) => setRemotePath(event.target.value)}
+                    placeholder="/Users/me/projects/my-project"
+                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-ring"
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    data-testid="add-project-remote-path-submit"
+                    disabled={pending || remotePath.trim().length === 0}
+                  >
+                    {t("Add project")}
+                  </Button>
+                </form>
+              ) : null}
 
               {mode === "menu" ? (
                 <>
@@ -519,6 +674,17 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                   >
                     {t("Git repository URL")}
                   </label>
+                  {remote ? (
+                    <input
+                      data-testid="add-project-clone-parent"
+                      aria-label={t("Parent folder on that machine")}
+                      type="text"
+                      value={remotePath}
+                      onChange={(event) => setRemotePath(event.target.value)}
+                      placeholder={t("Parent folder on that machine")}
+                      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-ring"
+                    />
+                  ) : null}
                   <input
                     id={`${labelId}-url`}
                     data-testid="add-project-clone-url"
@@ -539,9 +705,11 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                     data-feature-help={t(
                       "Choose a destination folder, clone the repository, and add it to PI Lab.",
                     )}
-                    disabled={pending || url.trim().length === 0}
+                    disabled={
+                      pending || url.trim().length === 0 || (remote && remotePath.trim() === "")
+                    }
                   >
-                    {t("Choose folder & clone")}
+                    {remote ? t("Clone") : t("Choose folder & clone")}
                   </Button>
                 </form>
               ) : null}
@@ -583,15 +751,17 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                         placeholder={t("Choose a folder")}
                         className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 outline-none focus:border-ring"
                       />
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={pickTemplateLocation}
-                        disabled={pending}
-                      >
-                        {t("Choose")}
-                      </Button>
+                      {remote ? null : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={pickTemplateLocation}
+                          disabled={pending}
+                        >
+                          {t("Choose")}
+                        </Button>
+                      )}
                     </div>
                     <Button
                       type="button"
@@ -608,17 +778,19 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
                   <div className="flex flex-col gap-1.5 text-sm">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium">{t("Files to include")}</span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 px-1.5 text-xs"
-                        onClick={pickTemplateFile}
-                        disabled={pending}
-                      >
-                        <Plus className="size-3" aria-hidden />
-                        {t("Add file")}
-                      </Button>
+                      {remote ? null : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-1.5 text-xs"
+                          onClick={pickTemplateFile}
+                          disabled={pending}
+                        >
+                          <Plus className="size-3" aria-hidden />
+                          {t("Add file")}
+                        </Button>
+                      )}
                     </div>
                     <div
                       data-testid="add-project-template-files"
@@ -744,6 +916,7 @@ export function AddProjectMenu(props: AddProjectMenuProps) {
       {setup ? (
         <EditProjectDialog
           mode="add"
+          canPickPaperFolder
           project={{ name: setup.name, typeId: "general", metadata: null, agentConfig: null }}
           pending={pending}
           error={error ? translateKnownError(language, error.message) : null}

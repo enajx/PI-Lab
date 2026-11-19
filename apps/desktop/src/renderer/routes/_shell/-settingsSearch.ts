@@ -16,6 +16,7 @@ const SETTINGS_SECTION_IDS = [
   "project-template",
   "library",
   "project-view",
+  "machines",
   "sections",
   "experiments",
   "shortcuts",

@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useLayoutEffect, useRef } from "react"
+import { isProjectPath } from "../../machines/projectRoute"
 import { escapeIsFree } from "../../shortcuts/keyGuards"
 import { eventMatchesShortcut, paletteForKeydown } from "../../shortcuts/shortcuts"
 import { rememberSettingsReturnRoute } from "./-settingsReturnRoute"
@@ -48,7 +49,7 @@ export function useGlobalShortcuts(
         void navigate({ to: "/settings" })
       } else if (
         eventMatchesShortcut(event, "quick-open") &&
-        routeRef.current.pathname.startsWith("/projects/")
+        isProjectPath(routeRef.current.pathname)
       ) {
         // This listener is installed before transient Settings listeners, so it prevents a
         // just-closed shortcut recorder from swallowing ⌘F during navigation back to a project.

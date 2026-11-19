@@ -1,10 +1,12 @@
-import { createTRPCClient, splitLink, type TRPCLink } from "@trpc/client"
+import { createTRPCClient, splitLink, TRPCClientError, type TRPCLink } from "@trpc/client"
 import type { AnyRouter } from "@trpc/server"
+import { observable } from "@trpc/server/observable"
 import { ipcLink } from "trpc-electron/renderer"
 import type { DesktopRouter } from "../../main/desktop/desktopRouter"
 import type { AppRouter } from "../../main/trpc/appRouter"
 import { isDesktopPath } from "../../shared/desktopPaths"
-import { connectionStatus } from "./connectionStatus"
+import { localServerOff, localServerOffLink } from "../machines/localServer"
+import { type ConnectionStatus, connectionStatus } from "./connectionStatus"
 import { createServerSockets, type ServerSockets } from "./serverLinks"
 
 let lastRequestId = 0
@@ -40,10 +42,31 @@ export function createIpcClient<TRouter extends AnyRouter>() {
  */
 let desktopClient: ReturnType<typeof createIpcClient<DesktopRouter>> | null = null
 
+/** The Electron-only router over IPC (server endpoints, remote machines). */
+export function desktopIpc(): ReturnType<typeof createIpcClient<DesktopRouter>> {
+  desktopClient ??= createIpcClient<DesktopRouter>()
+  return desktopClient
+}
+
 /** The server's WebSocket URL now, asked again on every connection attempt. */
 export async function serverSocketUrl(): Promise<string> {
-  desktopClient ??= createIpcClient<DesktopRouter>()
-  return (await desktopClient.desktop.serverEndpoint.query()).url
+  return (await desktopIpc().desktop.serverEndpoint.query()).url
+}
+
+/**
+ * The sockets to a remote machine's server (see main/machines). Its URL goes
+ * through the machine's SSH tunnel and is asked again on every connection
+ * attempt; it fails while the machine cannot be reached, so the socket retries.
+ */
+export function createMachineSockets(
+  machineId: string,
+  status: ConnectionStatus,
+): ServerSockets<AppRouter> {
+  return createServerSockets<AppRouter>({
+    url: async () => (await desktopIpc().desktop.machines.endpoint.query({ machineId })).url,
+    WebSocket: globalThis.WebSocket,
+    status,
+  })
 }
 
 /**
@@ -70,13 +93,66 @@ function sharedServerSockets(): ServerSockets<AppRouter> {
  * Components can inject fake clients.
  */
 export function createPiLabTrpcClient() {
+  // "Local server: Off": no local sockets; local calls fail at once with the reason.
+  if (localServerOff()) return createTrpcClientWith(localServerOffLink<AppRouter>())
+  return createTrpcClientOver(sharedServerSockets())
+}
+
+/**
+ * Electron-side calls that act on this Mac's server and Finder (see
+ * shared/desktopPaths.ts). For a project on another machine they would ask
+ * the wrong server, so a machine's client refuses them with a clear error
+ * (the views hide these actions there).
+ */
+const THIS_MAC_FILE_PATHS = [
+  "files.reveal",
+  "files.copyPath",
+  "documents.openInBrowser",
+  "notebooks.openInBrowser",
+]
+
+function refuseThisMacFilePaths(): TRPCLink<AppRouter> {
+  return () =>
+    ({ op, next }) => {
+      if (!THIS_MAC_FILE_PATHS.includes(op.path)) return next(op)
+      return observable((observer) => {
+        observer.error(
+          TRPCClientError.from(
+            new Error(`${op.path} is not available for a project on another machine`),
+          ),
+        )
+      })
+    }
+}
+
+/** The tRPC client of a remote machine: its server calls go over that machine's `sockets`. */
+export function createMachineTrpcClient(sockets: ServerSockets<AppRouter>) {
+  return createTRPCClient<AppRouter>({
+    links: [
+      uniqueRequestIds<AppRouter>(),
+      refuseThisMacFilePaths(),
+      splitLink({
+        condition: (op) => isDesktopPath(op.path),
+        true: ipcLink(),
+        false: sockets.link,
+      }),
+    ],
+  })
+}
+
+/** A client like {@link createPiLabTrpcClient} whose server calls go over `sockets`. */
+export function createTrpcClientOver(sockets: ServerSockets<AppRouter>) {
+  return createTrpcClientWith(sockets.link)
+}
+
+function createTrpcClientWith(serverLink: TRPCLink<AppRouter>) {
   return createTRPCClient<AppRouter>({
     links: [
       uniqueRequestIds<AppRouter>(),
       splitLink({
         condition: (op) => isDesktopPath(op.path),
         true: ipcLink(),
-        false: sharedServerSockets().link,
+        false: serverLink,
       }),
     ],
   })

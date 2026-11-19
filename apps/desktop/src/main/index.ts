@@ -19,6 +19,7 @@ import {
   BACKGROUND_TRAY_SNAPSHOT_CHANNEL,
   type BackgroundTraySnapshot,
 } from "../shared/backgroundTray"
+import { LOCAL_SERVER_OFF_CHANNEL } from "../shared/localServer"
 import {
   QUICK_EDIT_CLOSE_CHANNEL,
   QUICK_EDIT_CURRENT_CHANNEL,
@@ -59,6 +60,7 @@ import {
 } from "./identity/appIconSelection"
 import { createAlphaDockIcon } from "./identity/betaDockIcon"
 import { channelDataDir, channelIdentity, resolveAppChannel } from "./identity/channel"
+import { localServerAtStart } from "./machines/machineStore"
 import { FullBootScheduler } from "./quickEdit/fullBootScheduler"
 import { firstFileArgument } from "./quickEdit/launchArgs"
 import { QuickEditFiles } from "./quickEdit/service"
@@ -480,7 +482,7 @@ const requestUserQuit = createUserQuitAction({
       type: "question",
       title: `Quit ${app.getName()}?`,
       message: `Quit ${app.getName()}?`,
-      detail: quitDialogDetail(notebooks),
+      detail: quitDialogDetail(notebooks, runtime?.stopsServerOnQuit() === true),
       buttons: [...QUIT_DIALOG_BUTTONS],
       checkboxLabel: "Remember option",
       checkboxChecked: false,
@@ -496,7 +498,11 @@ const requestUserQuit = createUserQuitAction({
       console.error("[pi-lab] could not save the quit choice:", error)
     })
   },
-  quit: () => shutdownGuard.requestExplicitQuit(),
+  // "Local server" not Always: Quit also stops this Mac's server and agents.
+  quit: () => {
+    if (fullRuntime?.stopsServerOnQuit()) void requestQuitAndStopServer()
+    else shutdownGuard.requestExplicitQuit()
+  },
   background: () => {
     if (process.platform === "darwin") app.hide()
     else userWindow?.hide()
@@ -534,6 +540,43 @@ const requestStopServer = createStopServerAction({
     }),
   error: reportStopFailure,
 })
+/**
+ * Quit with "Local server" set to Only while PI Lab is open (or Off): like
+ * Stop Server and Agents, but a server that does not answer does not keep
+ * the app open; it is likely stopped already.
+ */
+const requestQuitAndStopServer = createStopServerAction({
+  pending: () => shutdownGuard.isQuitPending(),
+  work: async () => {
+    if (!fullRuntime) throw new Error("PI Lab has not started")
+    return fullRuntime.quitWork()
+  },
+  workTimeoutMs: 3_000,
+  confirmStop: async (work) => {
+    const result = await dialog.showMessageBox({
+      type: "warning",
+      title: "Work is still running",
+      ...stopWorkDialog(work),
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    })
+    return result.response === 0 ? "stop" : "cancel"
+  },
+  quitAndStop: () =>
+    shutdownGuard.requestExplicitQuitAndStop(async () => {
+      if (!fullRuntime) throw new Error("PI Lab has not started")
+      await fullRuntime.stopServerAndAgents().catch((error: unknown) => {
+        reportStopFailure(error)
+        throw error
+      })
+    }),
+  error: (error) => {
+    console.warn(`[pi-lab] the local server did not answer at Quit; quitting: ${String(error)}`)
+    shutdownGuard.requestExplicitQuit()
+  },
+})
+
 /** Stopping the server failed: the app stays open. */
 function reportStopFailure(error: unknown): void {
   const reason = error instanceof Error ? error.message : String(error)
@@ -680,6 +723,9 @@ function startFullBoot(): Promise<void> {
 const fullBootScheduler = new FullBootScheduler(startFullBoot, 200)
 
 ipcMain.handle(UPDATE_SNAPSHOT_CHANNEL, updateSnapshot)
+ipcMain.on(LOCAL_SERVER_OFF_CHANNEL, (event) => {
+  event.returnValue = localServerAtStart(app.getPath("userData")) === "off"
+})
 ipcMain.handle(UPDATE_CHECK_CHANNEL, async () => {
   await fullBootScheduler.startNow()
   if (!updateSnapshot().available) await publicUpdatesStarted

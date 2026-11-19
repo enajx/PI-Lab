@@ -1,8 +1,9 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import {
   assertOwnerOnly,
+  deviceProofKey,
   ensureLocalToken,
   TOKEN_FILE,
   tokenMatches,
@@ -42,11 +43,13 @@ export interface DeviceAccess {
   authenticate: (token: string | null) => string | null
   /** Remember an open connection of a device; returns the function that forgets it. */
   track: (deviceId: string, close: () => void) => () => void
+  /** The identity proof key of a valid remote device (its token hash), or null. */
+  proofKey: (deviceId: string) => string | null
+  /** Revoke a remote device and close its sockets; throws for the local device. */
+  revoke: (deviceId: string) => void
 }
 
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex")
-}
+const hashToken = deviceProofKey
 
 /**
  * Devices allowed to connect. The local device is the owner-only token file
@@ -78,6 +81,11 @@ export class DeviceRegistry implements DeviceAccess {
       return stored.length === presented.length && timingSafeEqual(stored, presented)
     })
     return device && device.revokedAt === null ? device.id : null
+  }
+
+  proofKey(deviceId: string): string | null {
+    const device = this.#devices.find((entry) => entry.id === deviceId)
+    return device && device.revokedAt === null ? device.tokenHash : null
   }
 
   track(deviceId: string, close: () => void): () => void {

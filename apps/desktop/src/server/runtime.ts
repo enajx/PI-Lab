@@ -73,6 +73,7 @@ import { seedWritableTemplate } from "../main/trpc/template"
 import { hasRunningProjectWorkflow, restoreProjectWorkflow } from "../main/trpc/workflows/workflows"
 import type { QuitWork } from "../main/window/userQuit"
 import type { BackgroundTraySnapshot } from "../shared/backgroundTray"
+import { ensureMachineId } from "./access"
 import { caffeinateAdapter } from "./caffeinate"
 import type { ServerConfig } from "./config"
 import { DeviceRegistry } from "./devices"
@@ -137,6 +138,8 @@ export class ServerRuntime {
   })
   readonly secrets: SecretStore
   readonly devices: DeviceRegistry
+  /** Stable id of this machine, from `machine-id` in the data folder. */
+  readonly machineId: string
   private activityStatus: ActivityStatusFeed | null = null
   private agentLaunchReady: Promise<void> | null = null
   private activityMonitor: ActivityMonitorPort | null = null
@@ -155,6 +158,7 @@ export class ServerRuntime {
       isTestMode && process.env.PI_LAB_TEST_NOTIFICATIONS !== "1",
     )
     this.devices = new DeviceRegistry(config.dataDir)
+    this.machineId = ensureMachineId(config.dataDir)
     this.secrets = createSecretStore({
       dataDir: config.dataDir,
       keychain: isTestMode ? testKeychain(config.dataDir) : macKeychain,
@@ -168,7 +172,7 @@ export class ServerRuntime {
    */
   async start(onStep: (step: ServerStartStep) => void): Promise<void> {
     onStep("migrating")
-    const dbStatus = initDatabase()
+    const dbStatus = initDatabase(this.config.build)
     loadNativeLanguage(this.config.profileDir)
     console.log(
       `[pi-lab server] db migrated: applied=${dbStatus.appliedCount} latest=${dbStatus.latestTag ?? "none"}`,

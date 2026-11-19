@@ -1,12 +1,21 @@
 import { cn } from "@pi-lab/ui"
 import { useQuery } from "@tanstack/react-query"
+import { useParams, useSearch } from "@tanstack/react-router"
 import { Bot, Coffee, FileText, FolderGit2, GitBranch, Server } from "lucide-react"
 import { type ReactNode, useRef, useState } from "react"
 import { useCaffeine } from "../../../../caffeine"
 import { usePopupDismiss } from "../../../../components/usePopupDismiss"
 import { useTranslate } from "../../../../i18n/language"
+import { CONNECTION_DOTS, CONNECTION_LABELS } from "../../../../machines/MachineControls"
+import {
+  MachineScope,
+  type MachineSummary,
+  showMachineUi,
+  useMachineState,
+  useMachines,
+} from "../../../../machines/machines"
 import { formatBinding, getBinding } from "../../../../shortcuts/shortcuts"
-import { type ConnectionState, useConnectionState } from "../../../../trpc/connectionStatus"
+import { useConnectionState } from "../../../../trpc/connectionStatus"
 import { useTRPC } from "../../../../trpc/react"
 import { useAgentStatus } from "../../-ProjectActivity"
 import { readSshConfigPathOverride } from "../../utils/sshConfigPathOverride"
@@ -61,12 +70,20 @@ function Item({
 export function StatusBar() {
   const t = useTranslate()
   const projectId = useViewProject()
+  // A remote machine's project view (route param) or Tasks, Analysis or LaTeX
+  // view (search value): its project and branch come from that machine.
+  const params = useParams({ strict: false }) as { machineId?: string }
+  const search = useSearch({ strict: false }) as { machineId?: string }
   return (
     <footer
       data-testid="window-status-bar"
       className="flex h-6 shrink-0 select-none items-center gap-4 bg-sidebar px-3 text-[11px] text-muted-foreground"
     >
-      {projectId ? <ProjectItems projectId={projectId} /> : null}
+      {projectId ? (
+        <MachineScope machineId={params.machineId ?? search.machineId ?? null}>
+          <ProjectItems projectId={projectId} />
+        </MachineScope>
+      ) : null}
       <AgentsItem />
       <CaffeineItem />
       <LatexItem />
@@ -228,18 +245,6 @@ function VersionItem() {
   )
 }
 
-const CONNECTION_LABELS: Record<ConnectionState, string> = {
-  connected: "Connected",
-  reconnecting: "Reconnecting",
-  disconnected: "Disconnected",
-}
-
-const CONNECTION_DOTS: Record<ConnectionState, string> = {
-  connected: "bg-emerald-500",
-  reconnecting: "bg-amber-500",
-  disconnected: "bg-destructive",
-}
-
 /** The state of this window's sockets to the PI Lab server: a dot and a word. */
 function ConnectionItem() {
   const t = useTranslate()
@@ -264,10 +269,53 @@ function ConnectionItem() {
   )
 }
 
-/** `N hosts` from `~/.ssh/config`; a click lists them (no Connect action yet). */
+/** One remote machine's connection state as a dot (the hosts item's button). */
+function MachineDot({ machine }: { machine: MachineSummary }) {
+  const state = useMachineState(machine.machineId)
+  return (
+    <span
+      data-testid="status-bar-machine-dot"
+      data-state={state}
+      className={cn("size-1.5 shrink-0 rounded-full", CONNECTION_DOTS[state])}
+      aria-hidden
+    />
+  )
+}
+
+/** One remote machine in the hosts popover: its name, ssh host and connection state. */
+function MachineRow({ machine }: { machine: MachineSummary }) {
+  const t = useTranslate()
+  const state = useMachineState(machine.machineId)
+  return (
+    <li
+      data-testid="status-bar-machine"
+      data-machine-id={machine.machineId}
+      data-state={state}
+      className="flex items-baseline justify-between gap-2 text-xs"
+    >
+      <span className="inline-flex min-w-0 items-center gap-1.5">
+        <span
+          className={cn("size-1.5 shrink-0 rounded-full", CONNECTION_DOTS[state])}
+          aria-hidden
+        />
+        <span className="truncate font-medium">{machine.name}</span>
+      </span>
+      <span className="truncate text-muted-foreground">
+        {`${machine.sshHost} · ${t(CONNECTION_LABELS[state])}`}
+      </span>
+    </li>
+  )
+}
+
+/**
+ * `N hosts` from `~/.ssh/config`, and once machines are added, a dot per
+ * machine with its connection state; a click lists the machines and the hosts
+ * (no Connect action yet).
+ */
 function HostsItem() {
   const t = useTranslate()
   const trpc = useTRPC()
+  const machines = useMachines(false) ?? []
   const [open, setOpen] = useState(false)
   const hostRef = useRef<HTMLDivElement | null>(null)
   const hosts = useQuery(
@@ -296,6 +344,14 @@ function HostsItem() {
       >
         <Server className="size-3 shrink-0" aria-hidden />
         {`${list.length} ${list.length === 1 ? t("host") : t("hosts")}`}
+        {showMachineUi(machines) ? (
+          <span className="ms-1 inline-flex items-center gap-1">
+            {`· ${machines.length} ${machines.length === 1 ? t("machine") : t("machines")}`}
+            {machines.map((machine) => (
+              <MachineDot key={machine.machineId} machine={machine} />
+            ))}
+          </span>
+        ) : null}
       </button>
       {open ? (
         <div
@@ -304,6 +360,16 @@ function HostsItem() {
           data-testid="status-bar-hosts-popover"
           className="absolute right-0 bottom-7 z-50 w-72 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-xl"
         >
+          {showMachineUi(machines) ? (
+            <>
+              <h2 className="font-semibold text-sm">{t("Machines")}</h2>
+              <ul className="mt-2 mb-3 space-y-1.5">
+                {machines.map((machine) => (
+                  <MachineRow key={machine.machineId} machine={machine} />
+                ))}
+              </ul>
+            </>
+          ) : null}
           <h2 className="font-semibold text-sm">{t("SSH hosts")}</h2>
           {list.length === 0 ? (
             <p className="mt-2 text-muted-foreground text-xs">{t("No hosts in ~/.ssh/config.")}</p>

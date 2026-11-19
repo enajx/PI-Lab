@@ -89,6 +89,7 @@ beforeAll(async () => {
     build: "test-build",
     version: "0.0.0-test",
     port: 0,
+    install: null,
   })
   await runtime.start(() => undefined)
   server = await listen({

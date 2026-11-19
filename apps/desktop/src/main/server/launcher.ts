@@ -1,6 +1,6 @@
 import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { homedir, userInfo } from "node:os"
 import { dirname, join } from "node:path"
@@ -54,6 +54,7 @@ export function serverLaunchConfig(input: LaunchInput): ServerConfig {
     build: input.build,
     version: input.version,
     port: 0,
+    install: null,
   }
 }
 
@@ -250,6 +251,19 @@ function startWithLaunchd(options: LauncherOptions): void {
   }
   const result = launchctl(["kickstart", `${domain}/${label}`])
   if (!result.ok) throw new Error(`launchctl kickstart failed: ${result.output.trim()}`)
+}
+
+/**
+ * Remove the per-user launchd agent when it exists ("Local server" is no
+ * longer Always): unload it, which also stops a server it runs, and delete
+ * its definition, so launchd no longer starts the server at login.
+ */
+export function removeLaunchdAgent(label: string): void {
+  const plistPath = join(homedir(), "Library", "LaunchAgents", `${label}.plist`)
+  if (!existsSync(plistPath)) return
+  console.log(`[pi-lab] removing launchd agent ${label}: the local server is not set to Always`)
+  launchctl(["bootout", `gui/${userInfo().uid}/${label}`])
+  rmSync(plistPath)
 }
 
 /** Source and test runs: a detached child that outlives this app. */

@@ -11,11 +11,15 @@ import {
   FilePlus2,
   FolderPlus,
   ListFilter,
+  Upload,
   X,
 } from "lucide-react"
 import { createContext, type ReactNode, useCallback, useContext, useState } from "react"
 import { useTranslate } from "../../../i18n/language"
+import { useMachineScope } from "../../../machines/machines"
+import { useCopyPath } from "../../../machines/useCopyPath"
 import { type FileTreeSort, useFileTreeSort } from "../../../preferences/preferences"
+import { desktopIpc } from "../../../trpc/client"
 import { useTRPC } from "../../../trpc/react"
 import type { FileTreeEntry } from "../../../trpc/types"
 import { FILE_DRAG_TYPE } from "../../fileDrag"
@@ -214,7 +218,65 @@ export function FileTree({
   const tabs = editorTabs?.tabs ?? []
   const reportActionError = (error: { message: string }) => setActionError(error.message)
   const reveal = useMutation(trpc.files.reveal.mutationOptions({ onError: reportActionError }))
-  const copyPath = useMutation(trpc.files.copyPath.mutationOptions({ onError: reportActionError }))
+  const copyPath = useCopyPath(reportActionError)
+  // A project on another machine: no Finder; Download and Upload instead.
+  const machineId = useMachineScope()?.machineId ?? null
+  const [transferNotice, setTransferNotice] = useState<string | null>(null)
+  const download = useMutation({
+    mutationFn: (relPath: string) => {
+      if (!machineId) throw new Error("Not a project on another machine")
+      return desktopIpc().desktop.machines.download.mutate({ machineId, workspaceId, relPath })
+    },
+    onMutate: () => {
+      setActionError(null)
+      setTransferNotice(null)
+    },
+    onSuccess: ({ savedTo }) => {
+      if (savedTo) setTransferNotice(`${t("Downloaded to ")}${savedTo}`)
+    },
+    onError: reportActionError,
+  })
+  const upload = useMutation({
+    mutationFn: (input: { folderRelPath: string; paths: string[] | null }) => {
+      if (!machineId) throw new Error("Not a project on another machine")
+      return desktopIpc().desktop.machines.upload.mutate({ machineId, workspaceId, ...input })
+    },
+    onMutate: () => {
+      setActionError(null)
+      setTransferNotice(null)
+    },
+    onSuccess: ({ uploaded, skipped }) => {
+      void invalidateTree()
+      if (uploaded.length === 0 && skipped.length === 0) return
+      setTransferNotice(
+        `${t("Uploaded files: ")}${uploaded.length}${
+          skipped.length > 0 ? `. ${t("Skipped: ")}${skipped.join(", ")}` : ""
+        }`,
+      )
+    },
+    onError: (error) => {
+      void invalidateTree()
+      reportActionError(error)
+    },
+  })
+  /** Files dragged in from Finder upload into the folder under the pointer (a file's folder, or the root). */
+  const dropUpload = (event: React.DragEvent) => {
+    if (!machineId || event.dataTransfer.files.length === 0) return
+    event.preventDefault()
+    const row = (event.target as HTMLElement).closest<HTMLElement>("[data-rel-path]")
+    const rowPath = row?.dataset.relPath ?? ""
+    const folderRelPath =
+      row?.dataset.testid === "file-tree-file" ? parentRelPath(rowPath) : rowPath
+    const paths = Array.from(event.dataTransfer.files).map(
+      (file) => window.piLab?.getPathForFile?.(file) ?? "",
+    )
+    if (paths.some((path) => path === "")) {
+      setActionError(t("Could not read a dropped file path"))
+      return
+    }
+    if (folderRelPath) setExpandedDirs((current) => new Set(current).add(folderRelPath))
+    upload.mutate({ folderRelPath, paths })
+  }
   const duplicate = useMutation(
     trpc.files.duplicate.mutationOptions({
       onError: reportActionError,
@@ -431,6 +493,19 @@ export function FileTree({
         >
           <FolderPlus className="size-3.5" aria-hidden />
         </button>
+        {machineId ? (
+          <button
+            type="button"
+            data-testid="file-tree-upload-button"
+            aria-label={t("Upload…")}
+            title={`${t("Upload files from this Mac into ")}${targetDir || t("project root")}`}
+            disabled={upload.isPending}
+            onClick={() => upload.mutate({ folderRelPath: targetDir, paths: null })}
+            className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+          >
+            <Upload className="size-3.5" aria-hidden />
+          </button>
+        ) : null}
         <button
           type="button"
           aria-label={`${t("File sort: ")}${t(FILE_TREE_SORT_LABELS[sort])}`}
@@ -452,7 +527,39 @@ export function FileTree({
           {actionError}
         </p>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto py-1">
+      {upload.isPending || download.isPending || transferNotice ? (
+        <p
+          data-testid="file-tree-transfer"
+          className="flex shrink-0 cursor-text select-text items-center gap-2 border-border border-b px-3 py-1.5 text-muted-foreground text-xs leading-snug"
+        >
+          <span className="min-w-0 flex-1 break-all">
+            {upload.isPending
+              ? t("Uploading…")
+              : download.isPending
+                ? t("Downloading…")
+                : transferNotice}
+          </span>
+          {transferNotice && !upload.isPending && !download.isPending ? (
+            <button
+              type="button"
+              className="shrink-0 underline"
+              onClick={() => setTransferNotice(null)}
+            >
+              {t("Dismiss")}
+            </button>
+          ) : null}
+        </p>
+      ) : null}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: a drop target for files from Finder; the header's Upload button and the folder menu's Upload… do the same by keyboard. */}
+      <div
+        className="min-h-0 flex-1 overflow-y-auto py-1"
+        onDragOver={(event) => {
+          if (!machineId || !event.dataTransfer.types.includes("Files")) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = "copy"
+        }}
+        onDrop={dropUpload}
+      >
         <TreeRowActionsContext.Provider value={rowActions}>
           <TreeLevel
             workspaceId={workspaceId}
@@ -492,10 +599,19 @@ export function FileTree({
           onOpen: (entry) => onOpenFile(entry.relPath),
           onNewFile: (entry) => startDraft("file", entry.relPath),
           onNewFolder: (entry) => startDraft("folder", entry.relPath),
-          onReveal: (entry) => {
-            setActionError(null)
-            reveal.mutate({ workspaceId, relPath: entry.relPath })
-          },
+          onReveal: machineId
+            ? undefined
+            : (entry) => {
+                setActionError(null)
+                reveal.mutate({ workspaceId, relPath: entry.relPath })
+              },
+          onDownload: machineId ? (entry) => download.mutate(entry.relPath) : undefined,
+          onUpload: machineId
+            ? (entry) => {
+                setExpandedDirs((current) => new Set(current).add(entry.relPath))
+                upload.mutate({ folderRelPath: entry.relPath, paths: null })
+              }
+            : undefined,
           onCopyPath: (entry, form) => {
             setActionError(null)
             copyPath.mutate({ workspaceId, relPath: entry.relPath, form })

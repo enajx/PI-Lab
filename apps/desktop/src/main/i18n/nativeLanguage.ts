@@ -138,6 +138,16 @@ const translations = {
     "إحضار الكل إلى المقدمة",
     "Flytt alle fremst",
   ],
+  Replace: ["替换", "바꾸기", "置き換える", "Reemplazar", "استبدال", "Erstatt"],
+  Skip: ["跳过", "건너뛰기", "スキップ", "Omitir", "تخطي", "Hopp over"],
+  "This file already exists on the other machine. Replace it?": [
+    "此文件已存在于另一台机器上。要替换吗？",
+    "이 파일은 다른 컴퓨터에 이미 있습니다. 바꿀까요?",
+    "このファイルは別のマシンにすでにあります。置き換えますか？",
+    "Este archivo ya existe en la otra máquina. ¿Reemplazarlo?",
+    "هذا الملف موجود بالفعل على الجهاز الآخر. هل تريد استبداله؟",
+    "Denne filen finnes allerede på den andre maskinen. Vil du erstatte den?",
+  ],
   "Routine started": [
     "例程已启动",
     "루틴가 시작됨",

@@ -4,6 +4,8 @@ import { FolderGit2 } from "lucide-react"
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { DictationController } from "../dictation/DictationController"
 import { useTranslate } from "../i18n/language"
+import { localServerOff } from "../machines/localServer"
+import { isProjectPath } from "../machines/projectRoute"
 import { NotificationBridge } from "../notifications/NotificationBridge"
 import {
   editorVimChoicePending,
@@ -136,7 +138,7 @@ function ShellLayout() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!eventMatchesShortcut(event, "quick-open")) return
       const path = pathRef.current
-      if (path.startsWith("/projects/") || path.startsWith("/science/")) return
+      if (isProjectPath(path) || path.startsWith("/science/")) return
       event.preventDefault()
       setFindProjectsOpen(true)
     }
@@ -146,8 +148,13 @@ function ShellLayout() {
 
   const content = (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      {defaultAgentError ? (
-        <p role="alert" className="bg-destructive/10 px-4 py-2 text-destructive text-sm">
+      {/* "Local server: Off": there are no local settings to read. */}
+      {defaultAgentError && !localServerOff() ? (
+        <p
+          role="alert"
+          data-testid="default-agent-error"
+          className="bg-destructive/10 px-4 py-2 text-destructive text-sm"
+        >
           {defaultAgentError}
         </p>
       ) : null}

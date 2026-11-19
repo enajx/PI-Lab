@@ -1,5 +1,7 @@
 import { useMutation } from "@tanstack/react-query"
 import { useTranslate } from "../../../../../i18n/language"
+import { useMachineScope } from "../../../../../machines/machines"
+import { useMachinePageUrl } from "../../../../../machines/useMachinePageUrl"
 import { useTRPC } from "../../../../../trpc/react"
 import type { NotebookPane } from "./useNotebookTabs"
 
@@ -19,6 +21,11 @@ export function NotebookSurface({
   const trpc = useTRPC()
   const openInBrowser = useMutation(trpc.notebooks.openInBrowser.mutationOptions())
   const addToProject = useMutation(trpc.notebooks.addToProject.mutationOptions())
+  // A notebook on another machine shows through a forwarded port; Open in browser is this Mac's only.
+  const onAnotherMachine = useMachineScope() !== null
+  const frame = useMachinePageUrl(
+    pane.status === "starting" || pane.status === "error" ? null : (pane.url ?? null),
+  )
   const toolName = pane.tool === "marimo" ? "marimo" : pane.tool === "jupyter" ? "Jupyter" : null
 
   if (pane.status === "starting") {
@@ -42,7 +49,8 @@ export function NotebookSurface({
   }
 
   const addResult = addToProject.data
-  const addError = addToProject.error?.message ?? openInBrowser.error?.message ?? null
+  const addError =
+    addToProject.error?.message ?? openInBrowser.error?.message ?? frame.error ?? null
   return (
     <div data-testid="notebook-surface" className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2 border-border border-b px-3 py-1.5 text-xs">
@@ -70,14 +78,16 @@ export function NotebookSurface({
               : t("Add Jupyter to this project")}
           </button>
         ) : null}
-        <button
-          type="button"
-          data-testid="notebook-open-browser"
-          onClick={() => openInBrowser.mutate({ serverId: pane.id })}
-          className="shrink-0 rounded-md border border-border px-2 py-1"
-        >
-          {t("Open in browser")}
-        </button>
+        {onAnotherMachine ? null : (
+          <button
+            type="button"
+            data-testid="notebook-open-browser"
+            onClick={() => openInBrowser.mutate({ serverId: pane.id })}
+            className="shrink-0 rounded-md border border-border px-2 py-1"
+          >
+            {t("Open in browser")}
+          </button>
+        )}
       </div>
       {addToProject.isPending ? (
         <p className="shrink-0 border-border border-b px-3 py-1.5 text-muted-foreground text-xs">
@@ -103,11 +113,11 @@ export function NotebookSurface({
           {addError}
         </p>
       ) : null}
-      {pane.url ? (
+      {frame.url ? (
         <iframe
           data-testid="notebook-frame"
           title={toolName ? `${toolName} notebook` : t("Notebook")}
-          src={pane.url}
+          src={frame.url}
           sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads allow-popups"
           referrerPolicy="no-referrer"
           className="min-h-0 w-full flex-1 border-0 bg-white"

@@ -12,7 +12,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import Database from "better-sqlite3"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { MigrationFailure, runMigrations } from "./migrate"
+import {
+  MigrationFailure,
+  preMigrationCopyPath,
+  runMigrations,
+  runMigrationsWithCopy,
+} from "./migrate"
 import { resolveMigrationsDir } from "./paths"
 import { getSettingsOrDefaults } from "./settings"
 import { DEFAULT_CAFFEINE_SETTINGS, DEFAULT_NOTIFICATION_SETTINGS, settings } from "./tables"
@@ -405,6 +410,55 @@ describe("runMigrations", () => {
       raw.prepare("SELECT name FROM sqlite_master WHERE name='rollback_probe'").get(),
     ).toBeUndefined()
     raw.close()
+  })
+
+  it("copies the database before pending migrations and keeps the last two copies", () => {
+    /** A copy of the shipped migrations plus `count` fake ones creating probe tables. */
+    const withExtra = (name: string, count: number): string => {
+      const folder = join(dataDir, name)
+      cpSync(resolveMigrationsDir(), folder, { recursive: true })
+      const journalPath = join(folder, "meta", "_journal.json")
+      const journal = JSON.parse(readFileSync(journalPath, "utf8"))
+      for (let index = 0; index < count; index++) {
+        const last = journal.entries.at(-1)
+        const tag = `${String(last.idx + 1).padStart(4, "0")}_probe_${index}`
+        journal.entries.push({ ...last, idx: last.idx + 1, when: last.when + 1, tag })
+        writeFileSync(join(folder, `${tag}.sql`), `CREATE TABLE probe_${index} (id INTEGER);`)
+      }
+      writeFileSync(journalPath, JSON.stringify(journal))
+      return folder
+    }
+    // A fresh database has nothing to copy.
+    runMigrationsWithCopy(dbPath, resolveMigrationsDir(), "build-a").sqlite.close()
+    expect(readdirSync(dataDir).filter((name) => name.includes(".pre-"))).toEqual([])
+    const raw = new Database(dbPath)
+    raw.exec(
+      "INSERT INTO projects (id, repo_path, name, created_at, updated_at, last_opened_at) VALUES ('p1', '/tmp/kept', 'Kept', 0, 0, 0)",
+    )
+    raw.close()
+
+    // No pending migration: no copy.
+    runMigrationsWithCopy(dbPath, resolveMigrationsDir(), "build-a").sqlite.close()
+    expect(readdirSync(dataDir).filter((name) => name.includes(".pre-"))).toEqual([])
+
+    // A pending migration: the copy holds the database as it was before it.
+    runMigrationsWithCopy(dbPath, withExtra("one", 1), "build-b").sqlite.close()
+    const copy = new Database(preMigrationCopyPath(dbPath, "build-b"), { readonly: true })
+    expect(copy.prepare("SELECT name FROM projects").all()).toEqual([{ name: "Kept" }])
+    expect(
+      copy.prepare("SELECT name FROM sqlite_master WHERE name = 'probe_0'").get(),
+    ).toBeUndefined()
+    copy.close()
+    // The copy opens with the migrations it was made under.
+    runMigrations(preMigrationCopyPath(dbPath, "build-b"), resolveMigrationsDir()).sqlite.close()
+
+    runMigrationsWithCopy(dbPath, withExtra("two", 2), "build-c").sqlite.close()
+    runMigrationsWithCopy(dbPath, withExtra("three", 3), "build-d").sqlite.close()
+    expect(
+      readdirSync(dataDir)
+        .filter((name) => name.includes(".pre-"))
+        .sort(),
+    ).toEqual(["local.db.pre-build-c", "local.db.pre-build-d"])
   })
 
   it("stops on an inconsistent partial schema and leaves its rows available", () => {

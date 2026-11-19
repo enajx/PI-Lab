@@ -21,7 +21,7 @@ import { createFakeTrpcClient, type FakeHandlers } from "../../../../../test/fak
 import { act, fireEvent, render, screen, waitFor, within } from "../../../../../test/render"
 import { ProjectActivityProvider } from "../../../-ProjectActivity"
 import { readPendingLaunch } from "../../../projects/-pendingLaunch"
-import { ProjectCard } from "./ProjectCard"
+import { type CardMachine, ProjectCard } from "./ProjectCard"
 
 /** Card behavior through renderer providers and a fake IPC client. */
 function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Project {
@@ -52,11 +52,16 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name">): Pr
 const IDLE_STATUS = { summary: null, fetchExperiments: null }
 
 function renderCard(p: Project, handlers: FakeHandlers = {}) {
-  return renderCardIn(p, handlers, (card) => card)
+  return renderCardIn(p, handlers, (card) => card, null)
 }
 
-/** Render the card through `wrap`, e.g. inside a dashboard CardGrid. */
-function renderCardIn(p: Project, handlers: FakeHandlers, wrap: (card: ReactNode) => ReactNode) {
+/** Render the card through `wrap`, e.g. inside a dashboard CardGrid; `machine` null is this Mac. */
+function renderCardIn(
+  p: Project,
+  handlers: FakeHandlers,
+  wrap: (card: ReactNode) => ReactNode,
+  machine: CardMachine | null,
+) {
   const { thumbnail, ...fields } = p
   const summary = { ...fields, hasThumbnail: thumbnail !== null }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -76,7 +81,7 @@ function renderCardIn(p: Project, handlers: FakeHandlers, wrap: (card: ReactNode
   const indexRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => wrap(<ProjectCard project={summary} />),
+    component: () => wrap(<ProjectCard project={summary} machine={machine} />),
   })
   const projectRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -157,13 +162,18 @@ const FULL_METADATA: ProjectMetadata = {
 describe("ProjectCard thumbnail", () => {
   test("the thumbnail height follows the shared card height scale", async () => {
     const renderInGrid = () =>
-      renderCardIn(project({ id: "p1", name: "Tall" }), {}, (card) => (
-        <CardGrid surface="dashboard" cardIds={["p1"]}>
-          <ResizableCardGridItem cardId="p1" label="Tall">
-            {card}
-          </ResizableCardGridItem>
-        </CardGrid>
-      ))
+      renderCardIn(
+        project({ id: "p1", name: "Tall" }),
+        {},
+        (card) => (
+          <CardGrid surface="dashboard" cardIds={["p1"]}>
+            <ResizableCardGridItem cardId="p1" label="Tall">
+              {card}
+            </ResizableCardGridItem>
+          </CardGrid>
+        ),
+        null,
+      )
     const first = renderInGrid()
     const baseHeight = Number.parseFloat(
       (await screen.findByTestId("project-card-image")).style.height,
@@ -812,4 +822,46 @@ test("a paper-only project's card offers only the paper and opens in LaTeX Edito
   expect(screen.queryByTestId("project-card-status-button")).toBeNull()
   fireEvent.click(screen.getByTestId("project-card-body"))
   expect((await screen.findByTestId("on-latex-route")).textContent).toBe("solo")
+})
+
+const OFFLINE_MACHINE: CardMachine = { machineId: "m1", name: "Lab server", offline: true }
+
+/** A remote card of a disconnected machine (shown from the cached list) writes nothing to its server. */
+test("a remote card of an offline machine does not store a default gradient", async () => {
+  const calls: unknown[] = []
+  renderCardIn(
+    project({ id: "p9", name: "Remote", gradient: null }),
+    {
+      "projects.setGradient": (input) => {
+        calls.push(input)
+        return null
+      },
+    },
+    (card) => card,
+    OFFLINE_MACHINE,
+  )
+  await screen.findByTestId("project-card-body")
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  expect(calls).toEqual([])
+})
+
+/** The paper folder picker runs on the machine's server (another host), so a remote card's Edit project has none. */
+test("Edit project on a remote card has no paper folder picker", async () => {
+  renderCardIn(
+    project({ id: "p10", name: "Remote" }),
+    {
+      "paper.get": () => ({
+        paper: null,
+        workspaceId: null,
+        rootRelPath: null,
+        autoDetect: true,
+      }),
+    },
+    (card) => card,
+    { machineId: "m1", name: "Lab server", offline: false },
+  )
+  fireEvent.contextMenu(await screen.findByTestId("project-card-body"))
+  fireEvent.click(screen.getByTestId("project-card-menu-edit"))
+  await screen.findByTestId("edit-project-paper-folder")
+  expect(screen.queryByTestId("edit-project-paper-choose")).toBeNull()
 })

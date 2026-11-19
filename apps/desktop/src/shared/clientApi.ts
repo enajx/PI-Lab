@@ -96,9 +96,23 @@ export const notificationStreamMessageSchema = z.discriminatedUnion("type", [
  * - `launch-ids`: agent starts accept a `launchId` and never run twice for one.
  * - `answer-request`: `server.answerRequest` (one answer per pending request).
  */
-export const SERVER_CAPABILITIES = ["devices", "launch-ids", "answer-request"] as const
+export const SERVER_CAPABILITIES = ["devices", "launch-ids", "answer-request", "machines"] as const
 
-export type ServerCapability = (typeof SERVER_CAPABILITIES)[number]
+/**
+ * Sent only by a server installed by install.sh (the server bundle): it
+ * updates itself, and a connecting app may update it over SSH.
+ */
+export const SERVER_UPDATE_CAPABILITY = "server-update"
+
+export type ServerCapability =
+  | (typeof SERVER_CAPABILITIES)[number]
+  | typeof SERVER_UPDATE_CAPABILITY
+
+/** "Update machines automatically" on one server; `selfUpdate` is false for a desktop app's server. */
+export const serverUpdateSettingsSchema = z.strictObject({
+  autoUpdate: z.boolean(),
+  selfUpdate: z.boolean(),
+})
 
 /**
  * What the server tells a client when it connects. Capabilities stay plain
@@ -110,6 +124,12 @@ export const serverHelloSchema = z.strictObject({
   version: z.string(),
   pid: z.number().int(),
   capabilities: z.array(z.string()),
+  /** Stable id of the server's machine (`machine-id` in its data folder). */
+  machineId: z.string(),
+  hostname: z.string(),
+  /** Node's `process.platform` and `process.arch` on the server. */
+  platform: z.string(),
+  arch: z.string(),
 })
 
 /** One device that may connect to the server; `local` is this machine's app. */

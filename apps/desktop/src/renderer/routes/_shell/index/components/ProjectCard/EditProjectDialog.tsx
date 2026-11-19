@@ -94,6 +94,7 @@ type PaperFolderDraft = { kind: "keep" } | ({ kind: "set" } & ChosenPaperFolder)
 export function EditProjectDialog({
   project,
   mode,
+  canPickPaperFolder,
   pending,
   error,
   onClose,
@@ -101,6 +102,11 @@ export function EditProjectDialog({
 }: {
   project: Pick<Project, "name" | "typeId" | "metadata" | "agentConfig"> & { id?: string }
   mode: "add" | "edit"
+  /**
+   * Offer "Choose…" for the paper folder. False for a project on another
+   * machine: the folder picker would open on that machine (or fail there).
+   */
+  canPickPaperFolder: boolean
   pending: boolean
   error: string | null
   onClose: () => void
@@ -486,18 +492,20 @@ export function EditProjectDialog({
                 >
                   {shownPaperDir === null ? t("None") : paperFolderLabel(shownPaperDir, t)}
                 </span>
-                <button
-                  type="button"
-                  data-testid="edit-project-paper-choose"
-                  disabled={paperPicker.busy}
-                  onClick={() => {
-                    setPaperError(null)
-                    paperPicker.choose()
-                  }}
-                  className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent/60 disabled:opacity-50"
-                >
-                  {t("Choose…")}
-                </button>
+                {canPickPaperFolder ? (
+                  <button
+                    type="button"
+                    data-testid="edit-project-paper-choose"
+                    disabled={paperPicker.busy}
+                    onClick={() => {
+                      setPaperError(null)
+                      paperPicker.choose()
+                    }}
+                    className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent/60 disabled:opacity-50"
+                  >
+                    {t("Choose…")}
+                  </button>
+                ) : null}
                 {canConnect ? (
                   <button
                     type="button"

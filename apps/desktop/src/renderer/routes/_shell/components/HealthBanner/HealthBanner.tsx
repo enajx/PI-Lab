@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { useTranslate } from "../../../../i18n/language"
+import { localServerOff } from "../../../../machines/localServer"
 import { useTRPC } from "../../../../trpc/react"
 
 /**
@@ -16,8 +17,24 @@ import { useTRPC } from "../../../../trpc/react"
 export function HealthBanner({ children }: { children?: ReactNode }) {
   const t = useTranslate()
   const trpc = useTRPC()
-  const ping = useQuery(trpc.health.ping.queryOptions({ message: "hello" }))
-  const dbVersion = useQuery(trpc.health.dbVersion.queryOptions())
+  // "Local server: Off": no local database to check; the added machines' projects show.
+  const localOff = localServerOff()
+  const ping = useQuery({
+    ...trpc.health.ping.queryOptions({ message: "hello" }),
+    enabled: !localOff,
+  })
+  const dbVersion = useQuery({ ...trpc.health.dbVersion.queryOptions(), enabled: !localOff })
+
+  if (localOff) {
+    return (
+      <div className="flex h-full flex-col">
+        <span data-testid="app-ready" data-local-server="off" className="sr-only">
+          {t("PI Lab ready")}
+        </span>
+        {children}
+      </div>
+    )
+  }
 
   if (ping.isError || dbVersion.isError) {
     const message = (ping.error ?? dbVersion.error)?.message ?? t("Unknown error")

@@ -60,6 +60,7 @@ function renderDetailsWith(
     >
       <EditProjectDialog
         mode={mode}
+        canPickPaperFolder
         project={p}
         pending={false}
         error={null}
