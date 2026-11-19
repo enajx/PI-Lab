@@ -11,10 +11,19 @@ import {
 } from "react-native"
 import { useConnection } from "../connection"
 import { useData } from "../data"
+import { type AgentTone, agentStatus } from "../logic/agentStatus"
 import type { ScreenProps } from "../navigation"
 import { newId } from "../storage"
 import { colors } from "../theme"
 import { useServerQuery } from "../useServerQuery"
+
+/** The dot colour of each agent status. */
+const TONE_COLORS: Record<AgentTone, string> = {
+  working: colors.working,
+  "needs-input": colors.waiting,
+  finished: colors.finished,
+  idle: colors.faint,
+}
 
 /**
  * One project: its live agents and their status (tap opens the session), a box
@@ -99,19 +108,12 @@ export function ProjectScreen({ route, navigation }: ScreenProps<"Project">) {
               testID={`agent-${agent.sessionId}`}
             >
               <View
-                style={[
-                  styles.dot,
-                  {
-                    backgroundColor: agent.state === "working" ? colors.working : colors.waiting,
-                  },
-                ]}
+                style={[styles.dot, { backgroundColor: TONE_COLORS[agentStatus(agent).tone] }]}
               />
               <Text style={styles.agentName} numberOfLines={1}>
                 {label(agent.agentId)}
               </Text>
-              <Text style={styles.agentState}>
-                {agent.state === "working" ? "Working" : "Waiting"}
-              </Text>
+              <Text style={styles.agentState}>{agentStatus(agent).label}</Text>
             </Pressable>
           ))}
         </View>

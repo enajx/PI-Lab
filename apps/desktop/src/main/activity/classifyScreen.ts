@@ -17,6 +17,8 @@ const QUESTION_PATTERNS = [
   /\bwhat (?:should|would|do|is|are|can)\b.{0,120}\?/i,
   /\bwhich\b.{0,120}\?/i,
   /\b(?:yes|no)\s*(?:\/|\bor\b)\s*(?:yes|no)\b/i,
+  // Claude Code's multiple-choice menu footer, whatever the question's wording.
+  /\bEnter to select\b.{0,40}\bto navigate\b/i,
 ]
 
 const FATAL_PATTERNS = [
@@ -57,13 +59,33 @@ function matchesAny(screen: string, patterns: readonly RegExp[]): boolean {
   return patterns.some((pattern) => pattern.test(screen))
 }
 
+/** A full-width line of Claude Code's input box border. */
+const BOX_RULE = /^\s*─{20,}\s*$/
+
+/**
+ * Claude Code's input box near the bottom of the screen: a `❯` line between
+ * two border lines. Any text in it (a suggestion for the next message, which
+ * the rendered text does not mark as dim, or a draft) is still the input
+ * prompt. A multiple-choice question's `❯ 1.` line has no border on both sides.
+ */
+function hasClaudeInputBox(lines: readonly string[]): boolean {
+  return lines.some(
+    (line, index) =>
+      /^\s*❯/.test(line) &&
+      BOX_RULE.test(lines[index - 1] ?? "") &&
+      BOX_RULE.test(lines[index + 1] ?? ""),
+  )
+}
+
 function hasCurrentNormalPrompt(screen: string): boolean {
-  const tail = screen
+  const lines = screen
     .split("\n")
     .map((line) => line.trimEnd())
     .filter((line) => line.trim().length > 0)
-    .slice(-4)
-  return tail.some((line) => matchesAny(line, NORMAL_PROMPT_PATTERNS))
+  return (
+    lines.slice(-4).some((line) => matchesAny(line, NORMAL_PROMPT_PATTERNS)) ||
+    hasClaudeInputBox(lines.slice(-6))
+  )
 }
 
 /**

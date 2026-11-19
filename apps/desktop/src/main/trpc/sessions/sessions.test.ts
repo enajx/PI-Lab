@@ -197,6 +197,42 @@ describe("sessions.start — default policy (worktreePerAgent OFF)", () => {
     })
   })
 
+  test("status and the Project Agents box give the reason a waiting agent waits", async () => {
+    const result = await h.caller.sessions.start({
+      origin: "tasks",
+      projectId,
+      agentId: PERMISSION_AGENT.id,
+    })
+    await waitFor(() =>
+      h.activityRegistry
+        .snapshot()
+        .sessions.some(
+          (session) => session.sessionId === result.sessionId && session.state === "waiting",
+        ),
+    )
+    let status: Array<{ sessionId: string }> = []
+    const stream = await h.caller.sessions.onStatus()
+    const subscription = stream.subscribe({
+      next: (sessions) => {
+        status = sessions
+      },
+    })
+    subscription.unsubscribe()
+    expect(status.find((session) => session.sessionId === result.sessionId)).toMatchObject({
+      state: "waiting",
+      waitingReason: "permission",
+    })
+    const rows = await h.caller.sessions.projectAgents({ projectId })
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        sessionId: result.sessionId,
+        status: "waiting",
+        waitingReason: "permission",
+      }),
+    )
+    await h.caller.terminal.kill({ sessionId: result.sessionId })
+  })
+
   test("no prior agent -> kind 'branch', cwd is the repo root, agent runs", async () => {
     const result = await h.caller.sessions.start({
       origin: "project",

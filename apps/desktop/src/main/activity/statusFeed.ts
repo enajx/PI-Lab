@@ -61,6 +61,9 @@ export class ActivityStatusFeed {
           workspaceId: session.workspaceId,
           origin: session.origin,
           state: session.state,
+          ...(session.state === "waiting" && session.waitingReason
+            ? { waitingReason: session.waitingReason }
+            : {}),
         },
       ]
     })

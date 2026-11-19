@@ -393,6 +393,15 @@ export const projectSummarySchema = projectSchema
 // Sessions
 // ---------------------------------------------------------------------------
 
+/** Why a waiting agent waits (`WaitingReason` in main/activity/types.ts). */
+const waitingReasonSchema = z.enum([
+  "initial-prompt",
+  "permission",
+  "question",
+  "turn-complete",
+  "idle",
+])
+
 /** Live state of one agent, for project indicators and the title bar. */
 export const liveAgentStatusSchema = z.strictObject({
   sessionId: z.string(),
@@ -402,6 +411,8 @@ export const liveAgentStatusSchema = z.strictObject({
   workspaceId: z.string().nullable(),
   origin: agentSessionOriginSchema,
   state: z.enum(["working", "waiting"]),
+  /** Why a waiting agent waits; left out while it works. */
+  waitingReason: waitingReasonSchema.optional(),
 })
 
 const projectAgentStatusSchema = z.enum(["working", "waiting", "done", "failed"])
@@ -416,6 +427,8 @@ export const projectAgentRowSchema = z.discriminatedUnion("kind", [
     origin: z.enum(["latex", "analysis", "tasks", "routine"]),
     name: z.string(),
     status: projectAgentStatusSchema,
+    /** Why a waiting agent waits; left out while it works. */
+    waitingReason: waitingReasonSchema.optional(),
     lastActiveAt: z.number(),
   }),
   z.strictObject({

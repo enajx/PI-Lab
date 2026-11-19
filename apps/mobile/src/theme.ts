@@ -12,6 +12,7 @@ export const colors = {
   accent: "#5E6AD2",
   waiting: "#E2A03F",
   working: "#4CB782",
+  finished: "#4EA7FC",
   danger: "#EB5757",
   footer: "#1C1C20",
 }

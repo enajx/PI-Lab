@@ -588,6 +588,9 @@ export function listProjectAgents(ctx: AppContext, projectId: string): ProjectAg
             : session.waitingReason === "turn-complete"
               ? "done"
               : "waiting",
+        ...(session.state === "waiting" && session.waitingReason
+          ? { waitingReason: session.waitingReason }
+          : {}),
         lastActiveAt:
           session.state === "working" ? now : (session.waitingSince ?? session.updatedAt),
       },

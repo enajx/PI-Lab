@@ -1,4 +1,5 @@
 import type { AgentSessionOrigin, WorkflowTask } from "@pi-lab/local-db"
+import type { WaitingReason } from "../main/activity/types"
 
 /** What the Project Agents box shows for one row. */
 export type ProjectAgentStatus = "working" | "waiting" | "done" | "failed"
@@ -19,6 +20,8 @@ export type ProjectAgentRow =
       /** The agent's catalog label, e.g. "Claude Code". */
       name: string
       status: ProjectAgentStatus
+      /** Why a waiting agent waits; left out while it works. */
+      waitingReason?: WaitingReason
       /** When the agent was last active (epoch ms); the current time while working. */
       lastActiveAt: number
     }

@@ -35,6 +35,49 @@ const CODEX_QUESTION_SCREEN = `
   2. Silent
 `
 
+// Captured from Claude Code 2.1 (cleaned: folder and model line made generic).
+// The turn has finished; the input box shows Claude Code's dim suggestion for
+// the next message, which the rendered screen text does not mark as dim.
+const CLAUDE_FINISHED_TURN_WITH_SUGGESTION_SCREEN = `
+ ▐▛███▛█   Claude Code
+▝▜██████▀  Model
+ ▝▝   ▝▝   /…/projects/example-project
+
+❯ Before doing anything, ask me one question about which colour I prefer.
+
+⏺ Answered Claude's questions:
+  ⎿ \u00a0· Which colour do you prefer? → Green
+
+⏺ Noted: you prefer green. What would you like me to work on?
+
+✻ Cooked for 2s · done 1:45 PM
+
+────────────────────────────────────────────────────────────────────────────────
+❯\u00a0List the files in this project
+────────────────────────────────────────────────────────────────────────────────
+  Model · example-project
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+`
+
+// Captured from Claude Code 2.1 (cleaned): a multiple-choice question.
+const CLAUDE_CHOICE_QUESTION_SCREEN = `
+❯ Before doing anything, ask me one question about which colour I prefer.
+────────────────────────────────────────────────────────────────────────────────
+ ☐ Colour
+
+Which colour do you prefer?
+
+❯ 1. Blue
+     Cool, calm blue
+  2. Green
+     Fresh, natural green
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`
+
 describe("classifyRenderedAgentScreen", () => {
   test.each([
     ["Claude", CLAUDE_PERMISSION_SCREEN],
@@ -46,6 +89,15 @@ describe("classifyRenderedAgentScreen", () => {
   test.each([
     ["Claude", CLAUDE_QUESTION_SCREEN],
     ["Codex", CODEX_QUESTION_SCREEN],
+    ["Claude multiple-choice", CLAUDE_CHOICE_QUESTION_SCREEN],
+    // The same menu with a question the wording patterns do not match.
+    [
+      "Claude multiple-choice (other wording)",
+      CLAUDE_CHOICE_QUESTION_SCREEN.replace(
+        "Which colour do you prefer?",
+        "What colour do you prefer?",
+      ),
+    ],
   ])("recognizes a rendered %s question screen", (_agent, screen) => {
     expect(classifyRenderedAgentScreen(screen).kind).toBe("question")
   })
@@ -55,6 +107,12 @@ describe("classifyRenderedAgentScreen", () => {
     ["Codex", "OpenAI Codex (v1.2.3)\nmodel: gpt-5\n\n› Ask Codex to do anything"],
   ])("recognizes a rendered %s normal input prompt", (_agent, screen) => {
     expect(classifyRenderedAgentScreen(screen).kind).toBe("normal-prompt")
+  })
+
+  test("a finished Claude turn whose input box shows a suggestion is a normal prompt", () => {
+    expect(classifyRenderedAgentScreen(CLAUDE_FINISHED_TURN_WITH_SUGGESTION_SCREEN).kind).toBe(
+      "normal-prompt",
+    )
   })
 
   test("a current prompt wins over permission text retained in visible scrollback", () => {

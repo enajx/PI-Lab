@@ -601,6 +601,30 @@ test("with alerts muted, a waiting agent reaches a device that connects later wi
   phone.close()
 })
 
+test("with alerts muted, an information event reaches a device that connects later through the history", async () => {
+  const desktop = connect(token)
+  await desktop.client.settings.updateNotifications.mutate({ muted: true })
+  runtime.notifications.notify({
+    eventType: "agentTurnCompletion",
+    title: "Agent finished its turn",
+    body: "Muted info event",
+    target: {
+      type: "agent",
+      projectId: "project",
+      workspaceId: "workspace",
+      sessionId: "muted-info-session",
+      agentId: "test-agent",
+      origin: "project",
+    },
+  })
+  const phone = connect(token)
+  const history = await phone.client.server.notificationHistory.query()
+  expect(history[0]).toMatchObject({ kind: "info", request: { body: "Muted info event" } })
+  await desktop.client.settings.updateNotifications.mutate({ muted: false })
+  desktop.close()
+  phone.close()
+})
+
 test("GET /identity proves the server holds the token without sending it, new for each nonce", async () => {
   expect(await proveServerIdentity(server.port, token)).toBe(true)
   // A client with another token (another data folder) does not accept this server.

@@ -134,12 +134,24 @@ test("with alerts muted or the event off, a waiting agent is still pending and s
   }
 })
 
-test("muted or disabled information events are not sent", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-lab-feed-"))
-  dirs.push(dir)
-  const muted = new NotificationFeed(dir, () => ({ ...preferences, muted: true }), false)
-  const seen: NotificationStreamMessage[] = []
-  muted.subscribe((message) => seen.push(message))
-  expect(muted.notify(finished)).toBe("muted")
-  expect(seen).toEqual([])
+test("muted, disabled or suppressed information events are still sent and kept, with no banner", () => {
+  const off = { enabled: false, sound: "chime" as const }
+  for (const [current, suppress] of [
+    [{ ...preferences, muted: true }, false],
+    [{ ...preferences, workflowCompletion: off }, false],
+    [preferences, true],
+  ] as const) {
+    const dir = mkdtempSync(join(tmpdir(), "pi-lab-feed-"))
+    dirs.push(dir)
+    const notifications = new NotificationFeed(dir, () => current, suppress)
+    const seen: NotificationStreamMessage[] = []
+    notifications.subscribe((message) => seen.push(message))
+    notifications.notify(finished)
+    expect(seen).toEqual([
+      { type: "alert", banner: false, event: expect.objectContaining({ kind: "info" }) },
+    ])
+    expect(notifications.history().map((event) => event.request.title)).toEqual([
+      "Routine finished",
+    ])
+  }
 })

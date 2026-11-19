@@ -4,6 +4,7 @@
 
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react"
 import { useConnection } from "./connection"
+import type { WaitingReason } from "./logic/agentStatus"
 import { Inbox, type InboxItem, type InboxSource } from "./logic/inbox"
 
 /** One live agent (`liveAgentStatusSchema` in the desktop's clientApi.ts). */
@@ -15,6 +16,8 @@ export interface LiveAgent {
   workspaceId: string | null
   origin: string
   state: "working" | "waiting"
+  /** Why a waiting agent waits; left out while it works. */
+  waitingReason?: WaitingReason
 }
 
 interface DataValue {

@@ -10,12 +10,12 @@ import type {
 } from "../main/notifications"
 
 /**
- * One notification the server decided to send. `info` events (what happened)
- * go into the history and are alerted only when they happen. `request` events
- * (an agent needs the user's input) stay pending until the agent stops waiting
- * or exits, and are alerted again to a client that connects while pending.
- * A request is recorded and sent even when alerts are muted or its event is
- * off, so every device can show and answer it; then it is sent with no banner.
+ * One notification the server sends. `info` events (what happened) go into
+ * the history and are alerted only when they happen. `request` events (an
+ * agent needs the user's input) stay pending until the agent stops waiting or
+ * exits, and are alerted again to a client that connects while pending.
+ * Every event is recorded and sent even when alerts are muted or its event is
+ * off, so every device lists it; then it is sent with no banner.
  */
 export interface NotificationEvent {
   id: string
@@ -28,7 +28,7 @@ export interface NotificationEvent {
 /**
  * What a connected client receives on its notification stream. `banner` is
  * false when the user's preferences say not to show a banner or play a sound
- * for this event; the client still lists a request so it can be answered.
+ * for this event; the client still lists the event (and can answer a request).
  */
 export type NotificationStreamMessage =
   | { type: "alert"; event: NotificationEvent; banner: boolean }
@@ -81,7 +81,6 @@ export class NotificationFeed implements NotificationSink {
       this.suppress || preferences.muted ? "muted" : setting.enabled ? "delivered" : "disabled"
     const banner = outcome === "delivered"
     const kind = request.eventType === "agentInput" ? "request" : "info"
-    if (kind === "info" && !banner) return outcome
     this.#sequence += 1
     const event: NotificationEvent = {
       id: `${Date.now()}-${this.#sequence}`,
