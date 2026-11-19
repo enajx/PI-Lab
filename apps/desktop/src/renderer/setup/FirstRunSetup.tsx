@@ -482,9 +482,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                 <span className="text-[11px] text-muted-foreground">
                   {multiMachineLocked
                     ? t("On while a machine is added. Remove all machines to turn it off.")
-                    : t(
-                        "Run persistent projects on remote machines over SSH",
-                      )}
+                    : t("Run persistent projects on remote machines over SSH")}
                 </span>
               </div>
             </section>
