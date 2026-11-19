@@ -109,7 +109,7 @@ function MultiMachineField({ on, locked }: { on: boolean; locked: boolean }) {
         description={
           locked
             ? "On while a machine is added. Remove all machines to turn it off."
-            : "Use projects on other computers over SSH. Off: PI Lab shows only this Mac."
+            : "Run persistent projects on remote machines over SSH"
         }
         checked={on || locked}
         disabled={locked || save.isPending}

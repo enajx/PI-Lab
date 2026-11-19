@@ -483,7 +483,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                   {multiMachineLocked
                     ? t("On while a machine is added. Remove all machines to turn it off.")
                     : t(
-                        "Use projects on other computers over SSH. Off: PI Lab shows only this Mac.",
+                        "Run persistent projects on remote machines over SSH",
                       )}
                 </span>
               </div>

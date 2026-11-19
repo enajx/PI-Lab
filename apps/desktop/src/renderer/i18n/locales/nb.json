@@ -1399,5 +1399,5 @@
   "Upload files from this Mac into ": "Last opp filer fra denne Mac-en til ",
   "Multi-machine": "Flere maskiner",
   "On while a machine is added. Remove all machines to turn it off.": "På så lenge en maskin er lagt til. Fjern alle maskiner for å slå det av.",
-  "Use projects on other computers over SSH. Off: PI Lab shows only this Mac.": "Bruk prosjekter på andre datamaskiner over SSH. Av: PI Lab viser bare denne Macen."
+  "Run persistent projects on remote machines over SSH": "Kjør varige prosjekter på eksterne maskiner over SSH"
 }
