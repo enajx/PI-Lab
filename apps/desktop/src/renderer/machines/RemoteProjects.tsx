@@ -1,11 +1,12 @@
 import { cn } from "@pi-lab/ui"
 import { Link } from "@tanstack/react-router"
-import { ChartArea, ListTodo, ScrollText } from "lucide-react"
+import { ResizableCardGridItem } from "../components/CardGrid"
 import { useTranslate } from "../i18n/language"
-import { useShowAnalysisSection } from "../preferences/preferences"
+import { ProjectActivityProvider } from "../routes/_shell/-ProjectActivity"
+import { ProjectCard } from "../routes/_shell/index/components/ProjectCard"
 import type { ProjectListItem } from "../trpc/types"
-import { MachineBadge } from "./MachineControls"
-import { type MachineSummary, useMachineState } from "./machines"
+import { MachineLabel } from "./MachineControls"
+import { MachineScope, type MachineSummary, useMachineState } from "./machines"
 import { projectRoute } from "./projectRoute"
 
 /**
@@ -14,13 +15,12 @@ import { projectRoute } from "./projectRoute"
  * show greyed with the last list the machine gave.
  */
 
-const CARD_ACTION_CLASS =
-  "inline-flex h-7 flex-1 items-center justify-center rounded-md border border-border text-muted-foreground outline-none transition-colors hover:bg-accent/60 hover:text-hover-foreground focus-visible:bg-accent/60"
-
 /**
- * One machine's projects as Dashboard cards (after this Mac's own cards), with
- * the Tasks, Analysis and LaTeX actions of a local card; those views follow
- * the project's machine (`machineId` in their address).
+ * One machine's projects as Dashboard cards (after this Mac's own cards): the
+ * same card as a local project, inside the machine's {@link MachineScope}, so
+ * its cover, agents line, buttons and milestone dots read and change the
+ * project on that machine's server. Not draggable (the saved order is this
+ * Mac's).
  */
 export function RemoteProjectCards({
   machine,
@@ -29,83 +29,32 @@ export function RemoteProjectCards({
   machine: MachineSummary
   projects: ProjectListItem[]
 }) {
-  const t = useTranslate()
-  const [showAnalysis] = useShowAnalysisSection()
   const state = useMachineState(machine.machineId)
   const offline = state === "disconnected"
   const { machineId } = machine
-  return projects
-    .filter((project) => !project.archivedAt)
-    .map((project) => {
-      const paperOnly = project.metadata?.paperOnly === true
-      const search = { machineId, projectId: project.id }
-      return (
-        <div
-          key={`${machineId}/${project.id}`}
-          data-testid="remote-project-card"
-          data-project-id={project.id}
-          data-machine-id={machineId}
-          data-offline={offline}
-          className={cn(
-            "flex min-h-28 flex-col rounded-xl border border-border bg-card",
-            offline && "opacity-50 grayscale",
-          )}
-        >
-          <Link
-            {...(paperOnly
-              ? ({ to: "/science/latex", search } as const)
-              : projectRoute(machineId, project.id))}
-            data-testid="remote-project-open"
-            title={offline ? `${machine.name}: ${t("Disconnected")}` : project.repoPath}
-            className="flex flex-1 flex-col gap-1.5 rounded-t-xl p-2.5 text-start outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <span className="w-full min-w-0 truncate font-medium text-foreground text-sm">
-              {project.name}
-            </span>
-            <MachineBadge name={machine.name} className="" />
-            <span className="min-w-0 truncate text-muted-foreground text-xs">
-              {project.repoPath}
-            </span>
-          </Link>
-          <div className="flex items-center gap-1.5 border-border border-t p-1.5">
-            {paperOnly ? null : (
-              <Link
-                to="/science/tasks"
-                search={search}
-                data-testid="remote-project-tasks"
-                aria-label={`${t("Tasks")} ${project.name}`}
-                title={t("Tasks")}
-                className={CARD_ACTION_CLASS}
-              >
-                <ListTodo className="size-4 shrink-0" aria-hidden />
-              </Link>
-            )}
-            {showAnalysis && !paperOnly ? (
-              <Link
-                to="/science/analysis"
-                search={search}
-                data-testid="remote-project-analysis"
-                aria-label={`${t("Analysis")} ${project.name}`}
-                title={t("Analysis")}
-                className={CARD_ACTION_CLASS}
-              >
-                <ChartArea className="size-4 shrink-0" aria-hidden />
-              </Link>
-            ) : null}
-            <Link
-              to="/science/latex"
-              search={search}
-              data-testid="remote-project-latex"
-              aria-label={`${t("LaTeX Editor")} ${project.name}`}
-              title={t("LaTeX Editor")}
-              className={CARD_ACTION_CLASS}
+  const cardMachine = { machineId, name: machine.name, offline }
+  return (
+    <MachineScope machineId={machineId}>
+      <ProjectActivityProvider>
+        {projects
+          .filter((project) => !project.archivedAt)
+          .map((project) => (
+            <ResizableCardGridItem
+              key={`${machineId}/${project.id}`}
+              cardId={`${machineId}/${project.id}`}
+              label={project.name}
+              testId="remote-project-card"
+              data-project-id={project.id}
+              data-machine-id={machineId}
+              data-offline={offline}
+              className={cn("rounded-xl", offline && "opacity-50 grayscale")}
             >
-              <ScrollText className="size-4 shrink-0" aria-hidden />
-            </Link>
-          </div>
-        </div>
-      )
-    })
+              <ProjectCard project={project} machine={cardMachine} />
+            </ResizableCardGridItem>
+          ))}
+      </ProjectActivityProvider>
+    </MachineScope>
+  )
 }
 
 /** One machine's projects as sidebar rows (after this Mac's own rows). */
@@ -155,7 +104,7 @@ export function RemoteProjectRows({
           ) : (
             <>
               <span className="min-w-0 flex-1 truncate">{project.name}</span>
-              <MachineBadge name={machine.name} className="" />
+              <MachineLabel name={machine.name} offline={offline} />
             </>
           )}
         </Link>

@@ -1399,5 +1399,17 @@
   "Upload files from this Mac into ": "从这台 Mac 上传文件到 ",
   "Multi-machine": "多机器",
   "On while a machine is added. Remove all machines to turn it off.": "添加了机器时保持开启。移除所有机器后才能关闭。",
-  "Run persistent projects on remote machines over SSH": "通过 SSH 在远程机器上运行持久项目"
+  "Run persistent projects on remote machines over SSH": "通过 SSH 在远程机器上运行持久项目",
+  "Machine settings": "机器设置",
+  "Show its projects": "显示其项目",
+  "Reconnect": "重新连接",
+  "Machine card": "机器卡片",
+  "Remove machine": "移除机器",
+  "Remove machine?": "移除这台机器?",
+  "PI Lab forgets this machine and revokes its token there when it can be reached. The projects and files on the machine stay.": "PI Lab 会忘记这台机器，并在能连接时撤销它上面的令牌。机器上的项目和文件会保留。",
+  "Address": "地址",
+  "Unknown": "未知",
+  "Connection": "连接",
+  "Server version": "服务器版本",
+  "Click to show its projects on the Projects Dashboard; right-click for more.": "点击可在项目仪表板中显示其项目；右键查看更多选项。"
 }

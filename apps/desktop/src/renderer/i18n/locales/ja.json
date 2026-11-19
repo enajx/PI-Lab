@@ -1399,5 +1399,17 @@
   "Upload files from this Mac into ": "この Mac からファイルをアップロード: ",
   "Multi-machine": "複数マシン",
   "On while a machine is added. Remove all machines to turn it off.": "マシンが追加されている間はオンです。オフにするにはすべてのマシンを削除してください。",
-  "Run persistent projects on remote machines over SSH": "SSH でリモートマシン上の永続的なプロジェクトを実行します"
+  "Run persistent projects on remote machines over SSH": "SSH でリモートマシン上の永続的なプロジェクトを実行します",
+  "Machine settings": "マシンの設定",
+  "Show its projects": "このマシンのプロジェクトを表示",
+  "Reconnect": "再接続",
+  "Machine card": "マシンカード",
+  "Remove machine": "マシンを削除",
+  "Remove machine?": "マシンを削除しますか?",
+  "PI Lab forgets this machine and revokes its token there when it can be reached. The projects and files on the machine stay.": "PI Lab はこのマシンを削除し、接続できる場合はそのマシン上のトークンを無効にします。マシン上のプロジェクトとファイルは残ります。",
+  "Address": "アドレス",
+  "Unknown": "不明",
+  "Connection": "接続",
+  "Server version": "サーバーのバージョン",
+  "Click to show its projects on the Projects Dashboard; right-click for more.": "クリックするとプロジェクトダッシュボードにこのマシンのプロジェクトを表示します。右クリックでその他の操作。"
 }

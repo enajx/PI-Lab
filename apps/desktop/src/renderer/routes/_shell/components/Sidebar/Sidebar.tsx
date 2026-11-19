@@ -23,15 +23,10 @@ import { LatexText } from "../../../../components/LatexText"
 import { usePopupDismiss } from "../../../../components/usePopupDismiss"
 import { useInterfaceLanguage, useTranslate } from "../../../../i18n/language"
 import { localServerOff } from "../../../../machines/localServer"
+import { CONNECTION_LABELS, machineIcon } from "../../../../machines/MachineControls"
+import { MachineMenu, useShowMachineProjects } from "../../../../machines/MachineMenu"
 import {
-  CONNECTION_DOTS,
-  CONNECTION_LABELS,
-  effectiveFilter,
-  filterShows,
-  MachineBadge,
-  MachineFilter,
-} from "../../../../machines/MachineControls"
-import {
+  type MachineProjects,
   type MachineSummary,
   showMachineUi,
   useMachineState,
@@ -43,7 +38,6 @@ import {
   dismissNonGitNotice,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
-  useMachineFilter,
   useNavOrder,
   useRestoreProjectTabs,
   useShowHiddenProjects,
@@ -385,12 +379,9 @@ export function Sidebar() {
   const projectsQuery = useQuery({ ...trpc.projects.list.queryOptions(), enabled: !localOff })
   const localProjects = localOff ? [] : projectsQuery.data
   const projectActivityStates = useProjectActivityStates()
-  // Remote machines: their projects follow this Mac's, each with a machine badge.
+  // Remote machines: their projects follow this Mac's, each with a machine label.
   const machines = useMachines(false) ?? []
   const remote = useRemoteProjects(machines)
-  const [machineFilterValue, setMachineFilter] = useMachineFilter()
-  const machineFilter = effectiveFilter(machineFilterValue, machines)
-  const localBadge = showMachineUi(machines) ? t("This Mac") : null
   const routeParams = useParams({ strict: false }) as { machineId?: string; projectId?: string }
   const projects = localProjects ?? []
   const hiddenCount =
@@ -429,6 +420,16 @@ export function Sidebar() {
     }),
   )
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null)
+  // The Machines group's right-click menu: which machine, at the pointer.
+  const [machineMenu, setMachineMenu] = useState<{
+    machineId: string
+    x: number
+    y: number
+  } | null>(null)
+  const machineMenuEntry =
+    machineMenu === null
+      ? null
+      : (remote.find((entry) => entry.machine.machineId === machineMenu.machineId) ?? null)
   // The project whose Edit project dialog is open (the same dialog as the Dashboard card).
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
   const editingProject = projects.find((project) => project.id === editingProjectId) ?? null
@@ -458,9 +459,7 @@ export function Sidebar() {
 
   // `projects.list` returns the saved project order, the one the Dashboard cards use too.
   const reorderProjects = useProjectReorder((message) => setActionError(message))
-  const orderedProjects = filterShows(machineFilter, null)
-    ? projects.filter((project) => showHidden || !project.archivedAt)
-    : []
+  const orderedProjects = projects.filter((project) => showHidden || !project.archivedAt)
   const projectRowProps = useDragReorder(
     orderedProjects.map((project) => project.id),
     reorderProjects,
@@ -522,15 +521,6 @@ export function Sidebar() {
               {t("Projects")}
             </Link>
           )}
-          {showMachineUi(machines) && !collapsed ? (
-            <MachineFilter
-              machines={machines}
-              value={machineFilter}
-              onChange={setMachineFilter}
-              testId="sidebar-machine-filter"
-              className="mx-1 mb-1"
-            />
-          ) : null}
           {orderedProjects.length === 0 && remote.every((entry) => entry.projects.length === 0) ? (
             collapsed ? null : (
               <p
@@ -545,7 +535,6 @@ export function Sidebar() {
               <ProjectItem
                 key={project.id}
                 project={project}
-                machineName={localBadge}
                 collapsed={collapsed}
                 workspaceState={readProjectWorkspaceState(project.id, restoreProjectTabs)}
                 agentStatus={projectAgentStatus(projectActivityStates.get(project.id) ?? "idle")}
@@ -563,21 +552,19 @@ export function Sidebar() {
               />
             ))
           )}
-          {remote
-            .filter((entry) => filterShows(machineFilter, entry.machine.machineId))
-            .map((entry) => (
-              <RemoteProjectRows
-                key={entry.machine.machineId}
-                machine={entry.machine}
-                projects={entry.projects}
-                collapsed={collapsed}
-                activeProjectId={
-                  routeParams.machineId === entry.machine.machineId
-                    ? (routeParams.projectId ?? null)
-                    : null
-                }
-              />
-            ))}
+          {remote.map((entry) => (
+            <RemoteProjectRows
+              key={entry.machine.machineId}
+              machine={entry.machine}
+              projects={entry.projects}
+              collapsed={collapsed}
+              activeProjectId={
+                routeParams.machineId === entry.machine.machineId
+                  ? (routeParams.projectId ?? null)
+                  : null
+              }
+            />
+          ))}
           <ProjectVisibilityToggle
             hiddenCount={hiddenCount ?? 0}
             showHidden={showHidden}
@@ -588,7 +575,11 @@ export function Sidebar() {
           />
         </nav>
 
-        <MachinesNav machines={machines} collapsed={collapsed} />
+        <MachinesNav
+          remote={remote}
+          collapsed={collapsed}
+          onMenu={(machineId, x, y) => setMachineMenu({ machineId, x, y })}
+        />
 
         {!collapsed && showFeatureHelp ? (
           <FeatureHelpPanel onHide={() => setShowFeatureHelp(false)} />
@@ -630,6 +621,17 @@ export function Sidebar() {
           setProjectMenu(null)
         }}
       />
+
+      {machineMenu !== null && machineMenuEntry !== null ? (
+        <MachineMenu
+          key={machineMenu.machineId}
+          machine={machineMenuEntry.machine}
+          projectCount={machineMenuEntry.projects.length}
+          position={{ x: machineMenu.x, y: machineMenu.y }}
+          onClose={() => setMachineMenu(null)}
+          onError={setActionError}
+        />
+      ) : null}
 
       {editingProject ? (
         <EditProjectDialog
@@ -1170,31 +1172,54 @@ function SettingsNav({ collapsed }: { collapsed: boolean }) {
   )
 }
 
-/** One machine in the sidebar's Machines group: a dot with its connection state, and its name. */
-function MachineNavRow({ machine, collapsed }: { machine: MachineSummary; collapsed: boolean }) {
+/**
+ * One machine in the sidebar's Machines group: an icon with its connection
+ * state ({@link machineIcon}) and its name. A click shows its projects on the
+ * Projects Dashboard; a right click opens its menu.
+ */
+function MachineNavRow({
+  machine,
+  collapsed,
+  onMenu,
+}: {
+  machine: MachineSummary
+  collapsed: boolean
+  onMenu: (x: number, y: number) => void
+}) {
   const t = useTranslate()
   const state = useMachineState(machine.machineId)
-  const { location } = useRouterState()
+  const showProjects = useShowMachineProjects()
+  const icon = machineIcon(state, machine.updating)
   return (
-    <Link
-      to="/settings"
-      search={{ section: "machines" }}
+    <button
+      type="button"
       data-testid="sidebar-machine"
       data-machine-id={machine.machineId}
       data-state={state}
+      data-icon={icon.name}
       title={`${machine.name} · ${t(CONNECTION_LABELS[state])}`}
       data-feature-label={machine.name}
-      data-feature-help={`${machine.sshHost} · ${t(CONNECTION_LABELS[state])}`}
-      onClick={() => rememberSettingsReturnRoute(location)}
-      className={cn(navRowClass, collapsed && "justify-center", navStateClass(false))}
+      data-feature-help={`${machine.sshHost} · ${t(CONNECTION_LABELS[state])}. ${t("Click to show its projects on the Projects Dashboard; right-click for more.")}`}
+      onClick={() => showProjects(machine.machineId)}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        onMenu(event.clientX, event.clientY)
+      }}
+      className={cn(navRowClass, "text-start", collapsed && "justify-center", navStateClass(false))}
     >
-      <span className={cn("size-2 shrink-0 rounded-full", CONNECTION_DOTS[state])} aria-hidden />
+      <icon.Icon
+        className={cn(
+          "size-4 shrink-0",
+          state === "disconnected" ? "text-muted-foreground" : "text-sidebar-foreground",
+        )}
+        aria-hidden
+      />
       {collapsed ? (
         <span className="sr-only">{machine.name}</span>
       ) : (
         <span className="flex-1 truncate">{machine.name}</span>
       )}
-    </Link>
+    </button>
   )
 }
 
@@ -1202,10 +1227,18 @@ function MachineNavRow({ machine, collapsed }: { machine: MachineSummary; collap
  * The remote machines this app connects to, with an add action (Settings >
  * Machines). Shown once a machine is added; the first one is added in Settings.
  */
-function MachinesNav({ machines, collapsed }: { machines: MachineSummary[]; collapsed: boolean }) {
+function MachinesNav({
+  remote,
+  collapsed,
+  onMenu,
+}: {
+  remote: MachineProjects[]
+  collapsed: boolean
+  onMenu: (machineId: string, x: number, y: number) => void
+}) {
   const t = useTranslate()
   const { location } = useRouterState()
-  if (!showMachineUi(machines)) return null
+  if (!showMachineUi(remote.map((entry) => entry.machine))) return null
   return (
     <nav
       aria-label={t("Machines")}
@@ -1232,8 +1265,13 @@ function MachinesNav({ machines, collapsed }: { machines: MachineSummary[]; coll
           </Link>
         </div>
       )}
-      {machines.map((machine) => (
-        <MachineNavRow key={machine.machineId} machine={machine} collapsed={collapsed} />
+      {remote.map(({ machine }) => (
+        <MachineNavRow
+          key={machine.machineId}
+          machine={machine}
+          collapsed={collapsed}
+          onMenu={(x, y) => onMenu(machine.machineId, x, y)}
+        />
       ))}
     </nav>
   )
@@ -1248,7 +1286,6 @@ function MachinesNav({ machines, collapsed }: { machines: MachineSummary[]; coll
  */
 function ProjectItem({
   project,
-  machineName,
   collapsed,
   workspaceState,
   agentStatus,
@@ -1256,8 +1293,6 @@ function ProjectItem({
   onContextMenu,
 }: {
   project: ProjectSummary
-  /** The machine badge ("This Mac"), shown once a remote machine is added; null shows none. */
-  machineName: string | null
   collapsed: boolean
   workspaceState: ProjectWorkspaceState | undefined
   agentStatus: ProjectAgentStatus
@@ -1376,7 +1411,6 @@ function ProjectItem({
         >
           {project.name}
         </Link>
-        {machineName === null ? null : <MachineBadge name={machineName} className="" />}
         {hasUnsavedEdits ? <UnsavedProjectMarker /> : null}
         <ProjectAgentStatusRing status={agentStatus} />
       </div>

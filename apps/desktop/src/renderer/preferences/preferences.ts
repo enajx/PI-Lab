@@ -831,9 +831,10 @@ export function writeComposeChoice(sessionId: string, on: boolean): void {
 const MACHINE_FILTER_KEY = "pi-lab.machineFilter"
 
 /**
- * Which machine's projects the Projects Dashboard and the sidebar show: "" for
- * every machine, "local" for this Mac, or a remote machine's id. Shown only
- * once a machine is added.
+ * Which machine's projects the Projects Dashboard shows: "" for every
+ * machine, "local" for this Mac, or a remote machine's id. Set by its dropdown
+ * and by a click on a machine in the sidebar's Machines group. Shown only once
+ * a machine is added.
  */
 export function useMachineFilter(): [string, (next: string) => void] {
   return useStringPref(MACHINE_FILTER_KEY, "")

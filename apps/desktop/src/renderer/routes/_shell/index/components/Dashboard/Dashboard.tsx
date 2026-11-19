@@ -59,13 +59,7 @@ const SLIDE_TRANSITION = { duration: 160, easing: "cubic-bezier(0.2, 0, 0, 1)" }
  * One project card that can be dragged (by its thumbnail or body) or moved with the
  * keyboard (focus it, Space, arrow keys, Space) to a new place in the grid.
  */
-function SortableProjectCard({
-  project,
-  machineName,
-}: {
-  project: DashboardProject
-  machineName: string | null
-}) {
+function SortableProjectCard({ project }: { project: DashboardProject }) {
   const {
     attributes,
     listeners,
@@ -93,7 +87,7 @@ function SortableProjectCard({
       )}
       style={{ transform: CSS.Translate.toString(transform), transition }}
     >
-      <ProjectCard project={project} machineName={machineName} />
+      <ProjectCard project={project} machine={null} />
     </ResizableCardGridItem>
   )
 }
@@ -120,13 +114,12 @@ export function Dashboard() {
   const projectsQuery = useQuery({ ...trpc.projects.list.queryOptions(), enabled: !localOff })
   const localProjects = localOff ? [] : projectsQuery.data
   const [collapsed] = useSidebarCollapsed()
-  // Remote machines: their projects follow this Mac's, each with a machine badge.
+  // Remote machines: their projects follow this Mac's, each with a machine label.
   const machines = useMachines(false) ?? []
   const remote = useRemoteProjects(machines)
   const [machineFilterValue, setMachineFilter] = useMachineFilter()
   const machineFilter = effectiveFilter(machineFilterValue, machines)
   const showLocal = filterShows(machineFilter, null)
-  const localBadge = showMachineUi(machines) ? t("This Mac") : null
 
   const projects = localProjects ?? []
   const hiddenCount =
@@ -237,7 +230,7 @@ export function Dashboard() {
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={visibleIds} strategy={rectSortingStrategy}>
               {visibleProjects.map((project) => (
-                <SortableProjectCard key={project.id} project={project} machineName={localBadge} />
+                <SortableProjectCard key={project.id} project={project} />
               ))}
             </SortableContext>
           </DndContext>

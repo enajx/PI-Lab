@@ -1,9 +1,15 @@
-import { QueryClientProvider, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  hashKey,
+  QueryClientProvider,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { createContext, type ReactNode, useContext, useEffect } from "react"
 import type { DeviceMachineSettings, MachineSummary } from "../../main/machines/machineConnections"
 import { desktopIpc } from "../trpc/client"
 import { type ConnectionState, useStatusState } from "../trpc/connectionStatus"
-import { TRPCProvider } from "../trpc/react"
+import { TRPCProvider, useTRPC } from "../trpc/react"
 import type { ProjectListItem } from "../trpc/types"
 import { closeRemovedMachines, type MachineRuntime, machineRuntime } from "./machineRuntime"
 
@@ -46,7 +52,7 @@ export function useMachineScope(): MachineRuntime | null {
 export const MACHINES_QUERY_KEY = ["desktop", "machines", "list"] as const
 
 /**
- * Whether machine UI (badges, the machine filter, the Machines group, the New
+ * Whether machine UI (machine labels, the machine filter, the Machines group, the New
  * project machine picker, the default machine) shows: only once a machine is
  * added, so a single computer looks as before. The one place this rule lives.
  * A machine added means the multi-machine toggle is on (adding turns it on,
@@ -143,36 +149,66 @@ export interface MachineProjects {
   error: string | null
 }
 
+/** The root-cache query key of a machine's project list ({@link useRemoteProjects}). */
+export function machineProjectsKey(machineId: string): readonly [string, string] {
+  return ["machine-projects", machineId]
+}
+
 /**
  * The project lists of the remote machines, from their own servers. The last
  * list each machine gave is kept in localStorage, so a machine that is offline
  * (also after a restart of the app) still shows its projects with their last
- * known data.
+ * known data. The list is also kept under `projects.list` in the machine's own
+ * query cache, so a change made inside its {@link MachineScope} (a project
+ * card's stage, thumbnail or Hide) that invalidates `projects.list` reads the
+ * list here again.
  */
 export function useRemoteProjects(machines: MachineSummary[]): MachineProjects[] {
   const queryClient = useQueryClient()
+  const trpc = useTRPC()
+  const listKey = trpc.projects.list.queryKey()
+  const listHash = hashKey(listKey)
   const ids = machines.map((machine) => machine.machineId).join("\n")
-  // A machine whose calls socket opens again (back online, or its server restarted) is read again.
+  // A machine whose calls socket opens again (back online, or its server restarted) is read
+  // again, and so is one whose `projects.list` was invalidated in its own cache.
   useEffect(() => {
     const stops = ids
       .split("\n")
       .filter((id) => id !== "")
-      .map((machineId) =>
-        machineRuntime(machineId).status.onReopened((name) => {
-          if (name === "calls") {
-            void queryClient.invalidateQueries({ queryKey: ["machine-projects", machineId] })
-          }
-        }),
-      )
+      .flatMap((machineId) => {
+        const runtime = machineRuntime(machineId)
+        const refresh = () =>
+          void queryClient.invalidateQueries({ queryKey: machineProjectsKey(machineId) })
+        return [
+          runtime.status.onReopened((name) => {
+            if (name === "calls") refresh()
+          }),
+          runtime.queryClient.getQueryCache().subscribe((event) => {
+            if (
+              event.type === "updated" &&
+              event.action.type === "invalidate" &&
+              event.query.queryHash === listHash
+            ) {
+              refresh()
+            }
+          }),
+        ]
+      })
     return () => {
       for (const stop of stops) stop()
     }
-  }, [ids, queryClient])
+  }, [ids, queryClient, listHash])
   const results = useQueries({
     queries: machines.map((machine) => ({
-      queryKey: ["machine-projects", machine.machineId],
+      queryKey: machineProjectsKey(machine.machineId),
       queryFn: async () => {
-        const projects = await machineRuntime(machine.machineId).client.projects.list.query()
+        const runtime = machineRuntime(machine.machineId)
+        const projects = await runtime.queryClient.fetchQuery({
+          queryKey: listKey,
+          queryFn: () => runtime.client.projects.list.query(),
+          staleTime: 0,
+          gcTime: Number.POSITIVE_INFINITY,
+        })
         writeCachedProjects(machine.machineId, projects)
         return projects
       },
