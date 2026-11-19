@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { afterEach, expect, test } from "vitest"
+import { afterEach, expect, test, vi } from "vitest"
 import type { DictationModel } from "../../dictation/catalog"
 import type { DictationEngine, EngineStatus } from "../../dictation/engine"
 import type { AudioDecoder } from "../../dictation/service"
@@ -160,4 +160,67 @@ test("fails a stream with a missing chunk and drops a cancelled one", async () =
   await expect(
     caller.dictation.stream.append({ streamId: cancelled.streamId, seq: 0, pcmBase64: "AAAA" }),
   ).rejects.toThrow("This recording is no longer on the server")
+})
+
+/** Stubbed engine: at most four streams are open at once; cancelling one frees its place. */
+test("refuses a fifth open stream with a clear error", async () => {
+  h = await readyHarness(recordingEngine("text"), null)
+  const caller = h.caller
+  const open = []
+  for (let index = 0; index < 4; index += 1) open.push(await caller.dictation.stream.start())
+  await expect(caller.dictation.stream.start()).rejects.toThrow(
+    "4 recordings are already open on the server; finish or cancel one first",
+  )
+  await caller.dictation.stream.cancel({ streamId: open[0]?.streamId ?? "" })
+  await expect(caller.dictation.stream.start()).resolves.toMatchObject({
+    streamId: expect.any(String),
+  })
+})
+
+/** Stubbed engine: a stream holds at most 10 minutes of 16 kHz 16-bit mono PCM (19,200,000 bytes). */
+test("refuses a stream longer than 10 minutes and drops it", async () => {
+  h = await readyHarness(recordingEngine("text"), null)
+  const caller = h.caller
+  const { streamId } = await caller.dictation.stream.start()
+  const minute = Buffer.alloc(16_000 * 2 * 60, 5).toString("base64")
+  for (let seq = 0; seq < 10; seq += 1)
+    await caller.dictation.stream.append({ streamId, seq, pcmBase64: minute })
+  await expect(
+    caller.dictation.stream.append({ streamId, seq: 10, pcmBase64: "AAAA" }),
+  ).rejects.toThrow("The recording is longer than 10 minutes, the most dictation takes")
+  await expect(
+    caller.dictation.stream.finish({ streamId, seq: 11, pcmBase64: "" }),
+  ).rejects.toThrow("This recording is no longer on the server")
+})
+
+/** Stubbed engine: pieces sent slowly cannot keep a stream open past 10 minutes and the idle time. */
+test("refuses a piece for a stream started 12 minutes ago", async () => {
+  h = await readyHarness(recordingEngine("text"), null)
+  const caller = h.caller
+  const started = Date.now()
+  const { streamId } = await caller.dictation.stream.start()
+  await caller.dictation.stream.append({ streamId, seq: 0, pcmBase64: "AAAA" })
+  vi.spyOn(Date, "now").mockReturnValue(started + 12 * 60_000)
+  await expect(
+    caller.dictation.stream.append({ streamId, seq: 1, pcmBase64: "AAAA" }),
+  ).rejects.toThrow("The recording is longer than 10 minutes, the most dictation takes")
+  vi.restoreAllMocks()
+})
+
+/** Stubbed engine and decoder: a compressed input over 64 MiB is refused before decoding. */
+test("refuses a recording over 64 MiB before decoding it, and asks the decoder for at most 10 minutes", async () => {
+  const limits: number[] = []
+  h = await readyHarness(recordingEngine("text"), async (_audio, _format, maxSeconds) => {
+    limits.push(maxSeconds)
+    return wavOf(Buffer.alloc(320, 1))
+  })
+  await expect(
+    h.caller.dictation.transcribeAudio({
+      audioBase64: "A".repeat(Math.ceil((64 * 1024 * 1024) / 3) * 4 + 4),
+      format: "m4a",
+    }),
+  ).rejects.toThrow()
+  expect(limits).toEqual([])
+  await h.caller.dictation.transcribeAudio({ audioBase64: "AAAA", format: "ogg" })
+  expect(limits).toEqual([600])
 })

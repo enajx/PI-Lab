@@ -26,6 +26,12 @@ interface SessionRuntime {
   candidate: WaitingCandidate | null
   idleTimer: ActivityTimer | null
   lastScreenFingerprint: string | null
+  /**
+   * The agent finished a turn in this server's lifetime (or was restored
+   * waiting at a finished turn). A later normal prompt is then a finished turn
+   * again, never the initial prompt: redraws must not turn it into one.
+   */
+  completedTurn: boolean
 }
 
 export interface ActivityRegistryDependencies {
@@ -117,6 +123,7 @@ export class ActivityRegistry {
       candidate: null,
       idleTimer: null,
       lastScreenFingerprint: null,
+      completedTurn: false,
     })
     this.publish([{ phase: "acquire", sessionId: input.sessionId, at }])
     return cloneRecord(record)
@@ -135,6 +142,7 @@ export class ActivityRegistry {
       candidate: null,
       idleTimer: null,
       lastScreenFingerprint: null,
+      completedTurn: restored.waitingReason === "turn-complete",
     }
     this.runtime.set(restored.sessionId, runtime)
     if (restored.state === "working") {
@@ -255,7 +263,7 @@ export class ActivityRegistry {
     ) {
       const reason =
         classification.kind === "normal-prompt"
-          ? record.turnArmed
+          ? record.turnArmed || runtime.completedTurn
             ? "turn-complete"
             : "initial-prompt"
           : classification.kind
@@ -356,6 +364,7 @@ export class ActivityRegistry {
 
     if (reason === "turn-complete") {
       record.turnArmed = false
+      this.requireRuntime(record.sessionId).completedTurn = true
       if (record.workflowState === "running") {
         record.workflowState = "completed"
         record.workflowCompletedAt = at

@@ -66,10 +66,14 @@ export interface DictationStatus {
 /** Recording formats a client may send: WAV goes to the engine as is, the others are decoded first. */
 export type DictationAudioFormat = "wav" | "m4a" | "ogg"
 
-/** Turn a compressed recording into a 16 kHz mono 16-bit WAV. */
+/**
+ * Turn a compressed recording into a 16 kHz mono 16-bit WAV. A recording
+ * longer than `maxSeconds` is refused without decoding it.
+ */
 export type AudioDecoder = (
   audio: Buffer,
   format: Exclude<DictationAudioFormat, "wav">,
+  maxSeconds: number,
 ) => Promise<Buffer>
 
 /** A transcription with the server's time spent on it, so a client can measure the rest. */
@@ -85,6 +89,8 @@ interface AudioStream {
   bytes: number
   nextSeq: number
   timer: NodeJS.Timeout
+  /** `Date.now()` at start. */
+  startedAt: number
 }
 
 export interface DictationServiceOptions {
@@ -114,7 +120,17 @@ interface DictationSettings {
 }
 
 const HISTORY_LIMIT = 100
-const MAX_WAV_BYTES = 64 * 1024 * 1024
+/** The largest WAV the engine is given, and the largest recording a client may send. */
+export const MAX_WAV_BYTES = 64 * 1024 * 1024
+/** The longest streamed or compressed recording the server takes: 10 minutes. */
+const MAX_RECORDING_SECONDS = 600
+/** 16 kHz mono 16-bit PCM. */
+const PCM_BYTES_PER_SECOND = 32_000
+/** 10 minutes of PCM: 19,200,000 bytes (about 18.3 MiB). */
+const MAX_STREAM_BYTES = MAX_RECORDING_SECONDS * PCM_BYTES_PER_SECOND
+/** Open streams at once: speech is one stream at a time per device, so a few devices fit. */
+const MAX_OPEN_STREAMS = 4
+const TOO_LONG = "The recording is longer than 10 minutes, the most dictation takes"
 const SETTINGS_ID = 1
 /** A stream with no new chunk for this long is dropped (the client went away). */
 const STREAM_IDLE_MS = 60_000
@@ -292,12 +308,14 @@ export class DictationService {
   /** Transcribe a recording in any {@link DictationAudioFormat}; compressed ones are decoded first. */
   async transcribeAudio(audio: Buffer, format: DictationAudioFormat): Promise<TimedTranscription> {
     if (audio.length === 0) throw new Error("The recording is empty")
+    if (audio.length > MAX_WAV_BYTES)
+      throw new Error("The recording is larger than 64 MiB, the most the server takes")
     if (format === "wav") return this.transcribeWav(audio)
     const decode = this.options.decodeAudio
     if (!decode) throw new Error(`This server cannot decode ${format} recordings; send a WAV`)
     this.requireReady()
     const started = performance.now()
-    const wav = await decode(audio, format)
+    const wav = await decode(audio, format, MAX_RECORDING_SECONDS)
     const decodeMs = Math.round(performance.now() - started)
     const result = await this.transcribeWav(wav)
     return { ...result, timings: { ...result.timings, decodeMs } }
@@ -310,6 +328,10 @@ export class DictationService {
    */
   startStream(): { streamId: string } {
     this.requireReady()
+    if (this.streams.size >= MAX_OPEN_STREAMS)
+      throw new Error(
+        `${MAX_OPEN_STREAMS} recordings are already open on the server; finish or cancel one first`,
+      )
     // A load failure is kept in the engine status and raised again by finish.
     void this.prepare().catch(() => undefined)
     const streamId = randomUUID()
@@ -318,6 +340,7 @@ export class DictationService {
       bytes: 0,
       nextSeq: 0,
       timer: this.streamTimer(streamId),
+      startedAt: Date.now(),
     })
     return { streamId }
   }
@@ -332,9 +355,14 @@ export class DictationService {
         `Part of the recording was lost (expected part ${stream.nextSeq}, got ${seq})`,
       )
     }
-    if (stream.bytes + pcm.length > MAX_WAV_BYTES) {
+    // The idle timer restarts with each piece; the start time bounds a stream sent slowly.
+    const lifetimeMs = MAX_RECORDING_SECONDS * 1000 + STREAM_IDLE_MS
+    if (
+      stream.bytes + pcm.length > MAX_STREAM_BYTES ||
+      Date.now() - stream.startedAt > lifetimeMs
+    ) {
       this.cancelStream(streamId)
-      throw new Error("The recording is too long to transcribe")
+      throw new Error(TOO_LONG)
     }
     stream.chunks.push(pcm)
     stream.bytes += pcm.length

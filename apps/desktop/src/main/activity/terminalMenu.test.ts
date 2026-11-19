@@ -169,6 +169,19 @@ describe("parseTerminalMenu", () => {
     ])
   })
 
+  test("a wrapped label whose line ends at the last column keeps the space between words", () => {
+    // The bash prompt with a shorter folder, so "from this" ends at column 79.
+    const before =
+      "      st/data/worktrees/00000000-0000-4000-8000-000000000000/agent-mwnka2tj\n      from this project"
+    const line = "      st/data/worktrees/00000000-0000-4000-8000-000000000000/agent-mw from this"
+    expect(line.length).toBe(COLS - 1)
+    const screen = fixture("claude-permission-bash").replace(before, `${line}\n      project`)
+    const parsed = parseTerminalMenu(screen, COLS)
+    expect(parsed?.menu.options[1]?.label).toBe(
+      "Yes, and always allow access to /private/var/folders/xx/000000000000000000000000000000/T/pi-lab-mobile-test/data/worktrees/00000000-0000-4000-8000-000000000000/agent-mw from this project",
+    )
+  })
+
   test("reads the plan approval prompt, whose third option takes typed text", () => {
     const { menu } = menuOf("claude-plan-approval")
     expect(menu.question).toBe(
@@ -274,6 +287,16 @@ describe("menuKeys", () => {
     expect(
       keys("claude-single-choice", { kind: "text", option: "5", text: "Mango\nor kiwi" }),
     ).toEqual({ writes: ["5", "Mango or kiwi", "\r"], finishes: true })
+  })
+
+  test("typed text cannot press keys: control characters are dropped", () => {
+    expect(
+      keys("claude-single-choice", {
+        kind: "text",
+        option: "5",
+        text: "Mango\r\u001b[B\u0003 or kiwi\u007f\u0004",
+      }),
+    ).toEqual({ writes: ["5", "Mango[B or kiwi", "\r"], finishes: true })
   })
 
   test("multi-select: a number ticks, Submit is reached with arrows, typed text goes to its row", () => {

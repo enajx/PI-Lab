@@ -1,10 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
+import { MAX_WAV_BYTES } from "../main/dictation/service"
 import type { AppContext } from "../main/trpc/context"
 import { dictationAudioFormat, timedTranscription } from "../main/trpc/dictation/dictation"
 
 /** `POST /dictation/transcribe?format=wav|m4a|ogg`: the body is the recording's bytes. */
 export const DICTATION_UPLOAD_PATH = "/dictation/transcribe"
-const MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 
 /**
  * Transcribe a recording sent as a plain binary body (no base64), with the
@@ -26,7 +26,7 @@ export async function handleDictationUpload(
   let bytes = 0
   for await (const chunk of request) {
     bytes += (chunk as Buffer).length
-    if (bytes > MAX_UPLOAD_BYTES) return reply(out, 413, "The recording is too long to transcribe")
+    if (bytes > MAX_WAV_BYTES) return reply(out, 413, "The recording is too long to transcribe")
     chunks.push(chunk as Buffer)
   }
   const result = await dictation.transcribeAudio(Buffer.concat(chunks), format.data).then(

@@ -51,8 +51,15 @@ function normalizeRenderedScreen(screen: string): string {
     .trim()
 }
 
+/**
+ * Claude Code blinks this glyph before a pending tool call (about every 0.6 s,
+ * also under a permission prompt). Left in, the blink changes the fingerprint
+ * faster than a waiting screen can be confirmed.
+ */
+const BLINKING_MARKER = /⏺/g
+
 function fingerprint(screen: string): string {
-  return normalizeRenderedScreen(screen).replace(/\s+/g, " ")
+  return normalizeRenderedScreen(screen).replace(BLINKING_MARKER, " ").replace(/\s+/g, " ")
 }
 
 function matchesAny(screen: string, patterns: readonly RegExp[]): boolean {

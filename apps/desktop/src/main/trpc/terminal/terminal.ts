@@ -42,12 +42,14 @@ const spawnInput = z.object({
 })
 
 const sessionIdInput = z.object({ sessionId: z.string() })
+/** One per app window or device; kept in memory per session, so its length is limited. */
+const clientIdInput = z.string().min(1).max(200)
 
 const writeInput = z.object({
   sessionId: z.string(),
   data: z.string(),
   /** The typing client's id; absent when the server itself writes (agent launch). */
-  clientId: z.string().min(1).optional(),
+  clientId: clientIdInput.optional(),
   /**
    * A typed key (with `clientId`; absent from released clients and for other
    * writes): its number in this client's sequence, the client's consumed point
@@ -71,7 +73,7 @@ const sendMessageInput = z.object({
   /** One per message; a resend after a lost reply uses the same ID. */
   messageId: z.string().min(1).max(200),
   text: z.string(),
-  clientId: z.string().min(1),
+  clientId: clientIdInput,
 })
 
 /** How many compose-line message IDs the server keeps; older ones are forgotten first. */
@@ -88,7 +90,7 @@ const chooseOptionInput = z.object({
   sessionId: z.string(),
   /** One per choice; a resend after a lost reply uses the same ID. */
   messageId: z.string().min(1).max(200),
-  clientId: z.string().min(1),
+  clientId: clientIdInput,
   /** The `id` of the menu the client showed (from `terminal.screenText`). */
   menuId: z.string().min(1),
   action: menuActionSchema,
@@ -117,7 +119,7 @@ const resizeInput = z.object({
   cols: z.number().int().positive(),
   rows: z.number().int().positive(),
   /** The client asking for the size (one id per app window or device). */
-  clientId: z.string().min(1),
+  clientId: clientIdInput,
 })
 
 /** A login shell is the sensible default when the UI doesn't name a command. */

@@ -480,6 +480,23 @@ describe("terminal menus (stand-in agent drawing captured Claude Code screens)",
     await caller.terminal.kill({ sessionId })
   })
 
+  test("a client id longer than 200 characters is refused before anything is written", async () => {
+    const { sessionId, keys } = await menuStandIn("claude-single-choice")
+    const menuId = (await caller.terminal.screenText({ sessionId })).menu?.id ?? ""
+    await expect(
+      caller.terminal.chooseOption({
+        sessionId,
+        messageId: "long-client",
+        clientId: "x".repeat(201),
+        menuId,
+        action: { kind: "choose", option: "1" },
+      }),
+    ).rejects.toThrow()
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(keys()).toEqual([])
+    await caller.terminal.kill({ sessionId })
+  })
+
   test("ticking a multi-select option does not end the menu", async () => {
     const { sessionId, keys } = await menuStandIn("claude-multi-select")
     const menuId = (await caller.terminal.screenText({ sessionId })).menu?.id ?? ""

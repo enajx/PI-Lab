@@ -88,6 +88,9 @@ interface OptionDraft {
   labelCol: number
 }
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: these are the characters to remove.
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g
+
 function indentOf(line: string): number {
   return line.length - line.trimStart().length
 }
@@ -101,9 +104,19 @@ function wrapped(previous: string, next: string, cols: number): boolean {
   return previous.length + 1 + firstWord.length > cols - 1
 }
 
-function joinWrapped(previous: string, rest: string, previousLine: string, cols: number): string {
-  // A line filled to the last column broke inside a word (a long path).
-  return previousLine.length >= cols - 1 ? `${previous}${rest}` : `${previous} ${rest}`
+/**
+ * Join continuation `line` to the text read so far. A line filled to the last
+ * column broke inside a word (a long path) only when that word and the next
+ * one together do not fit on a line; otherwise the break was at a space.
+ */
+function joinWrapped(previous: string, line: string, previousLine: string, cols: number): string {
+  const rest = line.trim()
+  const lastWord = previousLine.trim().split(" ").at(-1) ?? ""
+  const firstWord = rest.split(" ")[0] ?? ""
+  const brokeInsideWord =
+    previousLine.length >= cols - 1 &&
+    lastWord.length + firstWord.length > cols - 1 - indentOf(line)
+  return brokeInsideWord ? `${previous}${rest}` : `${previous} ${rest}`
 }
 
 /** One option line, or null when the line is no option. */
@@ -253,9 +266,9 @@ export function parseTerminalMenu(text: string, cols: number): ParsedMenu | null
     const previous = lines[index - 1] ?? ""
     const rest = line.trim()
     if (labelOpen && wrapped(previous, line, cols)) {
-      current.label = joinWrapped(current.label, rest, previous, cols)
+      current.label = joinWrapped(current.label, line, previous, cols)
     } else if (current.detail !== null && wrapped(previous, line, cols)) {
-      current.detail = joinWrapped(current.detail, rest, previous, cols)
+      current.detail = joinWrapped(current.detail, line, previous, cols)
     } else {
       current.detail = current.detail === null ? rest : `${current.detail} ${rest}`
       labelOpen = false
@@ -320,7 +333,11 @@ export function menuKeys(parsed: ParsedMenu, action: MenuAction): MenuKeys | nul
     if (parsed.numbered) return { writes: [option.key], finishes: endsMenu }
     return { writes: [...arrowsTo(parsed, row), "\r"], finishes: endsMenu }
   }
-  const text = action.text.replace(/\s*\n\s*/g, " ").trim()
+  // New lines become spaces; other control characters (Enter, Esc, Ctrl-C, ...) would press keys.
+  const text = action.text
+    .replace(/\s*\n\s*/g, " ")
+    .replace(CONTROL_CHARACTERS, "")
+    .trim()
   if (!option.freeText || text.length === 0 || !parsed.numbered) return null
   if (menu.multiSelect) return { writes: [...arrowsTo(parsed, row), text], finishes: false }
   return { writes: [option.key, text, "\r"], finishes: endsMenu }

@@ -81,6 +81,57 @@ function setup(): {
   return { time, registry, changes }
 }
 
+/** Claude Code's idle input box at the bottom of a `cols`-wide screen (cleaned capture). */
+function claudeInputBox(cols: number): string {
+  const rule = "─".repeat(cols)
+  return [
+    "❯ Reply with the single word ok",
+    "",
+    "⏺ ok",
+    "",
+    rule,
+    "❯ ",
+    rule,
+    "  Model · example-project",
+    "  ⏸ manual mode on",
+  ].join("\n")
+}
+
+/**
+ * A Claude Code 2.1 Bash permission prompt (captured at 80 columns, folder
+ * made generic). `marker` is the blinking glyph before the pending tool call:
+ * "⏺" or " ".
+ */
+function claudeBashPermission(marker: string): string {
+  const dashed = "╌".repeat(80)
+  return [
+    "",
+    "❯ Run the shell command: touch verify-hi.txt",
+    "",
+    `${marker} Creating empty file verify-hi.txt`,
+    "  ⎿  $ touch verify-hi.txt",
+    "",
+    "─".repeat(80),
+    " Bash command",
+    ' Tip: auto mode handles these prompts for you — choose "switch to auto mode"',
+    " below",
+    " Create empty file verify-hi.txt",
+    dashed,
+    " touch verify-hi.txt",
+    dashed,
+    " Do you want to proceed?",
+    " ❯ 1. Yes",
+    "   2. Yes, and always allow access to",
+    "      /private/var/folders/xx/000000000000000000000000000000/T/pi-lab-mobile-te",
+    "      st/data/worktrees/00000000-0000-4000-8000-000000000000/agent-mwnka2tj",
+    "      from this project",
+    "   3. Yes, and switch to auto mode · auto mode handles these prompts for you",
+    "   4. No",
+    "",
+    " Esc to cancel · Tab to amend",
+  ].join("\n")
+}
+
 function activityPhases(changes: readonly ActivityRegistryChange[]): string[] {
   return changes.flatMap((change) => change.activityEvents.map((event) => event.phase))
 }
@@ -253,6 +304,59 @@ describe("ActivityRegistry agent lifecycle", () => {
     if (!snapshotRecord) throw new Error("Expected registered session")
     snapshotRecord.state = "waiting"
     expect(registry.get(AGENT_SESSION.sessionId)?.state).toBe("working")
+  })
+
+  test("keeps a finished turn as turn-complete across redraws and after unprompted work", () => {
+    const { registry, time } = setup()
+    registry.register(AGENT_SESSION)
+    registry.userSubmitted(AGENT_SESSION.sessionId)
+    registry.observeRenderedScreen(AGENT_SESSION.sessionId, claudeInputBox(80))
+    time.advance(WAITING_CONFIRMATION_MS)
+    expect(registry.get(AGENT_SESSION.sessionId)).toMatchObject({
+      state: "waiting",
+      waitingReason: "turn-complete",
+      waitingEpisode: 1,
+    })
+
+    // A resize to 81 columns and back redraws the input box: new fingerprints.
+    registry.observeRenderedScreen(AGENT_SESSION.sessionId, claudeInputBox(81))
+    time.advance(WAITING_CONFIRMATION_MS)
+    registry.observeRenderedScreen(AGENT_SESSION.sessionId, claudeInputBox(80))
+    time.advance(WAITING_CONFIRMATION_MS)
+    expect(registry.get(AGENT_SESSION.sessionId)).toMatchObject({
+      state: "waiting",
+      waitingReason: "turn-complete",
+      waitingEpisode: 1,
+    })
+
+    // Work the user did not ask for (a background task's result) ends at the prompt again.
+    registry.observeRenderedScreen(AGENT_SESSION.sessionId, "⏺ The background build finished.")
+    expect(registry.get(AGENT_SESSION.sessionId)?.state).toBe("working")
+    registry.observeRenderedScreen(AGENT_SESSION.sessionId, claudeInputBox(80))
+    time.advance(WAITING_CONFIRMATION_MS)
+    expect(registry.get(AGENT_SESSION.sessionId)).toMatchObject({
+      state: "waiting",
+      waitingReason: "turn-complete",
+    })
+  })
+
+  test("confirms a Claude Code permission prompt whose tool marker blinks", () => {
+    const { registry, time } = setup()
+    registry.register(AGENT_SESSION)
+    registry.userSubmitted(AGENT_SESSION.sessionId)
+
+    // Claude Code blinks the ⏺ before the pending tool call about every 0.6 s.
+    for (let frame = 0; frame < 6; frame += 1) {
+      registry.observeRenderedScreen(
+        AGENT_SESSION.sessionId,
+        claudeBashPermission(frame % 2 === 0 ? "⏺" : " "),
+      )
+      time.advance(600)
+    }
+    expect(registry.get(AGENT_SESSION.sessionId)).toMatchObject({
+      state: "waiting",
+      waitingReason: "permission",
+    })
   })
 
   test("restores a durable working record and preserves the original idle deadline", () => {

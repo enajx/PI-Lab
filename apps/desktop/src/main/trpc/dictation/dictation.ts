@@ -1,5 +1,5 @@
 import { z } from "zod"
-import type { DictationService } from "../../dictation/service"
+import { type DictationService, MAX_WAV_BYTES } from "../../dictation/service"
 import type { AppContext } from "../context"
 import { publicProcedure, router } from "../trpc"
 
@@ -57,7 +57,16 @@ export const dictationRouter = router({
     .mutation(({ ctx, input }) => service(ctx).transcribe(input.wavBase64)),
   /** A phone recording: WAV as is, m4a (AAC) or Ogg Opus decoded on the server. */
   transcribeAudio: publicProcedure
-    .input(z.object({ audioBase64: z.string().min(1), format: dictationAudioFormat }))
+    .input(
+      z.object({
+        // Base64 of at most MAX_WAV_BYTES, checked before the bytes are decoded.
+        audioBase64: z
+          .string()
+          .min(1)
+          .max(Math.ceil(MAX_WAV_BYTES / 3) * 4),
+        format: dictationAudioFormat,
+      }),
+    )
     .output(timedTranscription)
     .mutation(({ ctx, input }) =>
       service(ctx).transcribeAudio(Buffer.from(input.audioBase64, "base64"), input.format),
