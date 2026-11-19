@@ -1,6 +1,8 @@
 import { Button, cn } from "@pi-lab/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Loader2 } from "lucide-react"
 import { useState } from "react"
+import type { InstallProgress } from "../../../../../main/machines/machineConnections"
 import type { LocalServerMode } from "../../../../../main/machines/machineStore"
 import { SERVER_UPDATE_CAPABILITY } from "../../../../../shared/clientApi"
 import { useTranslate } from "../../../../i18n/language"
@@ -24,6 +26,8 @@ import { SelectField, SettingsSection, TextField, ToggleField } from "./Settings
 
 /** How often the page reads the machines' state from Electron main (errors of the last attempt). */
 const MACHINES_REFRESH_MS = 2_000
+/** How often the Add machine form reads the step of the running add. */
+const ADD_PROGRESS_REFRESH_MS = 300
 
 /**
  * Settings > Machines: the remote machines this app connects to (add over
@@ -347,8 +351,12 @@ function MachineHeader({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {machine.updating ? (
-          <span data-testid="settings-machine-updating" className="text-muted-foreground text-xs">
-            {t("Updating…")}
+          <span data-testid="settings-machine-updating">
+            {machine.updateProgress ? (
+              <InstallProgressText progress={machine.updateProgress} />
+            ) : (
+              <span className="text-muted-foreground text-xs">{t("Updating…")}</span>
+            )}
           </span>
         ) : machine.updateAvailable ? (
           <Button
@@ -381,19 +389,71 @@ function MachineHeader({
   )
 }
 
+const STEP_LABELS: Record<InstallProgress["step"], string> = {
+  connecting: "Connecting…",
+  copying: "Copying server",
+  installing: "Installing server…",
+  enrolling: "Starting and enrolling…",
+}
+
+/** Megabytes with one decimal, for the copy of the server bundle. */
+function megabytes(bytes: number): string {
+  return (bytes / 1_000_000).toFixed(1)
+}
+
+/** A spinner and the step of an add or update, with the megabytes copied during the copy. */
+function InstallProgressText({ progress }: { progress: InstallProgress }) {
+  const t = useTranslate()
+  const label =
+    progress.step === "copying"
+      ? `${t(STEP_LABELS.copying)} ${megabytes(progress.sentBytes)} / ${megabytes(progress.totalBytes)} MB`
+      : t(STEP_LABELS[progress.step])
+  return (
+    <span
+      data-testid="settings-install-progress"
+      data-step={progress.step}
+      className="inline-flex items-center gap-1.5 text-muted-foreground text-xs"
+    >
+      <Loader2 className="size-3 animate-spin" aria-hidden />
+      {label}
+    </span>
+  )
+}
+
+const ADD_PROGRESS_KEY = ["desktop", "machines", "addProgress"] as const
+
 function AddMachineForm() {
   const t = useTranslate()
   const queryClient = useQueryClient()
   const [sshHost, setSshHost] = useState("")
   const [name, setName] = useState("")
+  const hosts = useQuery({
+    queryKey: ["desktop", "machines", "sshHosts"],
+    queryFn: () => desktopIpc().desktop.machines.sshHosts.query(),
+  })
   const add = useMutation({
     mutationFn: () => desktopIpc().desktop.machines.add.mutate({ sshHost, name }),
+    // A new add starts without the last step of the previous one.
+    onMutate: () => queryClient.setQueryData(ADD_PROGRESS_KEY, null),
     onSuccess: () => {
       setSshHost("")
       setName("")
       void queryClient.invalidateQueries({ queryKey: MACHINES_QUERY_KEY })
     },
   })
+  const progress = useQuery({
+    queryKey: ADD_PROGRESS_KEY,
+    queryFn: () => desktopIpc().desktop.machines.addProgress.query(),
+    enabled: add.isPending,
+    refetchInterval: ADD_PROGRESS_REFRESH_MS,
+  })
+  if (hosts.isError) throw hosts.error
+  const known = hosts.data ?? []
+  // Choosing a Host from ~/.ssh/config fills an empty Name (or the one it filled before) with it.
+  const chooseHost = (next: string) => {
+    if (known.includes(next) && (name === "" || known.includes(name))) setName(next)
+    setSshHost(next)
+  }
   return (
     <div data-testid="settings-add-machine" className="flex flex-col">
       <TextField
@@ -402,7 +462,8 @@ function AddMachineForm() {
         description="A host name, user@host, or a Host from ~/.ssh/config. If no PI Lab server runs there, PI Lab installs one."
         value={sshHost}
         placeholder="lab-server"
-        onChange={setSshHost}
+        suggestions={known}
+        onChange={chooseHost}
       />
       <TextField
         testId="settings-add-machine-name"
@@ -413,6 +474,11 @@ function AddMachineForm() {
         onChange={setName}
       />
       <div className="flex items-center justify-end gap-3 px-4 py-3">
+        {add.isPending ? (
+          <InstallProgressText
+            progress={progress.data ?? { step: "connecting", sentBytes: 0, totalBytes: 0 }}
+          />
+        ) : null}
         {add.error ? (
           <p
             role="alert"

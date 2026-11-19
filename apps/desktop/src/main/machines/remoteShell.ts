@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { createReadStream } from "node:fs"
+import { createReadStream, statSync } from "node:fs"
 import { connect } from "node:net"
 import { basename } from "node:path"
 import type { ServerBundleFiles } from "./serverBundle"
@@ -76,22 +76,28 @@ export async function openLocalNetworkAccess(access: RemoteAccess, host: string)
   })
 }
 
+/** A file streamed to a remote command's stdin; `onSent` gets the size of each chunk handed to ssh. */
+export interface RemoteInput {
+  file: string
+  onSent: (bytes: number) => void
+}
+
 /**
  * Run `command` on `host` over ssh; resolve with stdout, reject with stderr.
- * `stdinFile` is streamed to the command's stdin (null: no stdin). ssh is
+ * `stdin` is streamed to the command's stdin (null: no stdin). ssh is
  * stopped after `timeoutMs` without progress (no input sent, no output read).
  */
 export async function runRemote(
   access: RemoteAccess,
   host: string,
   command: string,
-  stdinFile: string | null,
+  stdin: RemoteInput | null,
   timeoutMs: number,
 ): Promise<string> {
   const child = spawn(
     access.sshPath,
     ["-o", "BatchMode=yes", ...access.extraSshArgs, host, command],
-    { stdio: [stdinFile === null ? "ignore" : "pipe", "pipe", "pipe"] },
+    { stdio: [stdin === null ? "ignore" : "pipe", "pipe", "pipe"] },
   )
   let stdout = ""
   let stderr = ""
@@ -110,9 +116,12 @@ export async function runRemote(
     stderr += chunk.toString()
     progress()
   })
-  if (stdinFile !== null && child.stdin) {
-    const input = createReadStream(stdinFile)
-    input.on("data", progress)
+  if (stdin !== null && child.stdin) {
+    const input = createReadStream(stdin.file)
+    input.on("data", (chunk: Buffer | string) => {
+      progress()
+      stdin.onSent(chunk.length)
+    })
     // ssh can end before all input is sent (link dropped, timed out); its exit
     // below reports that, so the broken pipe is not an error of its own.
     child.stdin.on("error", () => input.destroy())
@@ -192,22 +201,52 @@ export function bundleEnrollCommand(access: RemoteAccess): string {
 }
 
 /**
+ * Where "Add machine" or "Update" is: connecting (probe), copying the server
+ * bundle (bytes handed to ssh of the bundle's three files), installing
+ * (install.sh starts the server), enrolling (enroll and the first connection).
+ */
+export interface InstallProgress {
+  step: "connecting" | "copying" | "installing" | "enrolling"
+  /** Bytes of the bundle sent so far; 0 outside the copy. */
+  sentBytes: number
+  /** Size of the bundle's files; 0 outside the copy. */
+  totalBytes: number
+}
+
+/**
  * Copy this app's server bundle to `host` over the ssh connection and run its
  * install.sh there (`--from-file`, the access prefix and data folder). Agents
  * keep running: install.sh restarts only the server. Rejects with the
- * installer's message when it fails (it rolls back itself).
+ * installer's message when it fails (it rolls back itself). Reports the
+ * copying (with bytes) and installing steps to `onProgress`.
  */
 export async function installServerBundle(
   access: RemoteAccess,
   host: string,
   bundle: ServerBundleFiles,
+  onProgress: (progress: InstallProgress) => void,
 ): Promise<void> {
   const dir = (await runRemote(access, host, "mktemp -d", null, SSH_TIMEOUT_MS)).trim()
   if (!dir.startsWith("/")) throw new Error(`mktemp on ${host} gave ${dir}`)
   const remote = (file: string) => `${dir}/${basename(file)}`
-  for (const file of [bundle.tarball, bundle.sha256File, bundle.installer]) {
-    await runRemote(access, host, `cat > ${shellQuote(remote(file))}`, file, INSTALL_TIMEOUT_MS)
+  const files = [bundle.tarball, bundle.sha256File, bundle.installer]
+  const totalBytes = files.map((file) => statSync(file).size).reduce((sum, size) => sum + size, 0)
+  let sentBytes = 0
+  onProgress({ step: "copying", sentBytes, totalBytes })
+  const onSent = (bytes: number) => {
+    sentBytes += bytes
+    onProgress({ step: "copying", sentBytes, totalBytes })
   }
+  for (const file of files) {
+    await runRemote(
+      access,
+      host,
+      `cat > ${shellQuote(remote(file))}`,
+      { file, onSent },
+      INSTALL_TIMEOUT_MS,
+    )
+  }
+  onProgress({ step: "installing", sentBytes: 0, totalBytes: 0 })
   const env = Object.entries(access.installEnv)
     .map(([key, value]) => `${key}=${shellQuote(value)}`)
     .join(" ")

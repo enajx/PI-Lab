@@ -196,6 +196,7 @@ export function TextField({
   description,
   value,
   placeholder,
+  suggestions,
   onChange,
 }: {
   testId: string
@@ -203,14 +204,25 @@ export function TextField({
   description?: ReactNode
   value: string
   placeholder?: string
+  /** Values offered in a list under the input (a datalist); typing any other value stays possible. */
+  suggestions?: string[]
   onChange: (next: string) => void
 }) {
   const t = useTranslate()
+  const listId = `${testId}-suggestions`
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-3">
       <FieldLabel label={label} description={description} />
+      {suggestions ? (
+        <datalist id={listId} data-testid={listId}>
+          {suggestions.map((suggestion) => (
+            <option key={suggestion} value={suggestion} />
+          ))}
+        </datalist>
+      ) : null}
       <input
         type="text"
+        list={suggestions ? listId : undefined}
         data-testid={testId}
         aria-label={typeof label === "string" ? t(label) : undefined}
         data-feature-label={typeof label === "string" ? t(label) : undefined}

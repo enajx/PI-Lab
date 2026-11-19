@@ -1,9 +1,12 @@
-import { mkdirSync, readlinkSync, realpathSync } from "node:fs"
+import { mkdirSync, readlinkSync, realpathSync, statSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import { afterAll, beforeAll, expect, it } from "vitest"
 import { MachineConnections } from "../../apps/desktop/src/main/machines/machineConnections"
-import type { RemoteAccess } from "../../apps/desktop/src/main/machines/remoteShell"
+import type {
+  InstallProgress,
+  RemoteAccess,
+} from "../../apps/desktop/src/main/machines/remoteShell"
 import type { ServerBundleFiles } from "../../apps/desktop/src/main/machines/serverBundle"
 import { connectServer, processAlive, readServerDiscovery } from "../e2e/fixtures/serverClient"
 import { type SshTestServer, startSshTestServer } from "../support/sshTestServer"
@@ -20,7 +23,8 @@ import {
  * MachineConnections (driven from vitest, no Electron) probes the remote over
  * real ssh (a user-level test sshd on this Mac), copies this app's server
  * bundle over and runs install.sh (`--no-launchd`, temp prefix and data
- * folder, test mode), then enrolls and connects. The server keeps running
+ * folder, test mode), then enrolls and connects, reporting its steps and the
+ * bytes copied. The server keeps running
  * after the app side closes. A second add finds the installed server and
  * does not install again.
  */
@@ -74,9 +78,24 @@ it("installs this app's server bundle on a machine without PI Lab, then enrolls"
     })
 
   const first = connections()
-  const added = await first.add({ sshHost: sshd.host, name: "Test Mac" })
+  const progress: InstallProgress[] = []
+  const added = await first.add({ sshHost: sshd.host, name: "Test Mac" }, (step) =>
+    progress.push(step),
+  )
   expect(added.state, added.error ?? "").toBe("connected")
   expect(readlinkSync(join(remotePrefix, "current"))).toBe(`versions/${bundle.version}`)
+  // Steps in order, and the copy counts up to the size of the three files.
+  const steps = progress.map((entry) => entry.step).filter((step, i, all) => step !== all[i - 1])
+  expect(steps).toEqual(["connecting", "copying", "installing", "enrolling"])
+  const total = [files.tarball, files.sha256File, files.installer]
+    .map((file) => statSync(file).size)
+    .reduce((sum, size) => sum + size, 0)
+  const copies = progress.filter((entry) => entry.step === "copying")
+  expect(copies.length).toBeGreaterThan(10)
+  expect(copies.every((entry) => entry.totalBytes === total)).toBe(true)
+  expect(copies.at(-1)?.sentBytes).toBe(total)
+  const sent = copies.map((entry) => entry.sentBytes)
+  expect(sent).toEqual([...sent].sort((a, b) => a - b))
   const { url } = await first.endpoint(added.machineId)
   expect(url).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/trpc\?token=/)
   const token = decodeURIComponent(url.split("token=")[1] ?? "")
@@ -95,7 +114,11 @@ it("installs this app's server bundle on a machine without PI Lab, then enrolls"
   // Add again after Remove: the installed server is found and used, nothing is installed again.
   const second = connections()
   await second.remove(added.machineId)
-  const again = await second.add({ sshHost: sshd.host, name: "Test Mac" })
+  const againProgress: string[] = []
+  const again = await second.add({ sshHost: sshd.host, name: "Test Mac" }, (entry) =>
+    againProgress.push(entry.step),
+  )
+  expect([...new Set(againProgress)]).toEqual(["connecting", "enrolling"])
   expect(again.state, again.error ?? "").toBe("connected")
   expect(readServerDiscovery(remoteData)?.pid).toBe(serverPid)
   await second.close()
