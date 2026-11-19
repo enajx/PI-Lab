@@ -95,6 +95,12 @@ export function setMachinesSourceForTests(source: () => Promise<MachineSummary[]
 }
 
 /**
+ * How often the sidebar and Settings > Machines read the machines' state from
+ * Electron main (connection errors, update available, update progress).
+ */
+export const MACHINES_REFRESH_MS = 2_000
+
+/**
  * The machines this app connects to (Electron main, `desktop.machines.list`).
  * Call it outside every {@link MachineScope}: the list lives in the root
  * query cache. Connections of machines that left the list are closed.

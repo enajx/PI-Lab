@@ -262,9 +262,13 @@ test("add form: offers the Hosts of the ssh config, fills the Name, and shows th
   test.setTimeout(120_000)
   if (!sshd) throw new Error("not started")
   const sshConfig = join(rootDir, "ssh-config")
+  // An Include this user may not read is skipped; a trailing comment is not read as hosts.
+  const locked = join(rootDir, "ssh-config-locked")
+  await writeFile(locked, "Host locked-box\n")
+  await chmod(locked, 0o000)
   await writeFile(
     sshConfig,
-    `Host *\n  ServerAliveInterval 30\nHost lab-box *.example.org\n  User me\nHost ${sshd.host}\n`,
+    `Include ${locked}\nHost *\n  ServerAliveInterval 30\nHost lab-box *.example.org # lab\n  User me\nHost ${sshd.host}\n`,
   )
   // A slow enroll keeps the "Starting and enrolling" step on screen.
   const page = await launch({
@@ -604,6 +608,46 @@ test("Machines group: a click shows the machine's projects on the Dashboard; the
   await expect(card.getByTestId("machine-card-local-server")).toHaveText("Always")
   await page.keyboard.press("Escape")
   await expect(card).toHaveCount(0)
+
+  // A right click at the bottom of the window: the menu and the card stay inside it.
+  const windowHeight = await page.evaluate(() => window.innerHeight)
+  await machineRow.evaluate((row, y) => {
+    row.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: y }),
+    )
+  }, windowHeight - 4)
+  await expect(menu).toBeVisible()
+  const menuBox = await menu.boundingBox()
+  // Placed near the pointer (lower half of the window), shifted up to fit.
+  expect(menuBox?.y ?? 0).toBeGreaterThan(windowHeight / 2)
+  expect((menuBox?.y ?? 0) + (menuBox?.height ?? 0)).toBeLessThanOrEqual(windowHeight)
+  await menu.getByTestId("machine-menu-card").click()
+  await expect(card).toBeVisible()
+  await expect
+    .poll(async () => {
+      const box = await card.boundingBox()
+      return (box?.y ?? 0) + (box?.height ?? windowHeight)
+    })
+    .toBeLessThanOrEqual(windowHeight)
+  await page.keyboard.press("Escape")
+
+  // Hide the remote project: Show hidden brings it back with Unhide; the card counts what shows.
+  await remoteCard.getByTestId("project-card-body").click({ button: "right" })
+  await page.getByTestId("project-card-menu-hide").click()
+  await expect(remoteCard).toHaveCount(0)
+  await expect(page.getByTestId("remote-project-item")).toHaveCount(0)
+  await machineRow.click({ button: "right" })
+  await menu.getByTestId("machine-menu-card").click()
+  await expect(card.getByTestId("machine-card-projects")).toHaveText("0")
+  await page.keyboard.press("Escape")
+  await page.getByTestId("dashboard-show-hidden-projects").click()
+  await expect(remoteCard).toHaveCount(1)
+  await expect(page.getByTestId("remote-project-item")).toHaveCount(1)
+  await remoteCard.getByTestId("project-card-body").click({ button: "right" })
+  await page.getByTestId("project-card-menu-restore").click()
+  await expect(remoteCard.getByTestId("project-card")).toHaveAttribute("data-hidden", "false")
+  await expect(page.getByTestId("dashboard-show-hidden-projects")).toHaveCount(0)
+  await expect(remoteCard).toHaveCount(1)
 
   // Remove machine: asks first; Cancel keeps it, Remove forgets it.
   await machineRow.click({ button: "right" })

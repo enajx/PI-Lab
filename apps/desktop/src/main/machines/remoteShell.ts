@@ -40,24 +40,49 @@ export function shellQuote(word: string): string {
 /** How long the app's own connection to a machine may take before it is dropped. */
 const LOCAL_NETWORK_TOUCH_MS = 3_000
 
+/** How long `ssh -G` (it reads the config, no network) may take before it is stopped. */
+export const SSH_CONFIG_TIMEOUT_MS = 10_000
+
 /**
  * The address and port `ssh` would connect to for `host` (`ssh -G` reads the
- * config, no network), or null when ssh names none.
+ * config, no network), or null when ssh names none. Rejects with ssh's error
+ * text when it fails, and when it does not answer within `timeoutMs` (it is
+ * killed then).
  */
 export async function sshAddress(
   access: RemoteAccess,
   host: string,
+  timeoutMs: number,
 ): Promise<{ address: string; port: number } | null> {
   const config = await new Promise<string>((resolve, reject) => {
     const child = spawn(access.sshPath, [...access.extraSshArgs, "-G", host], {
-      stdio: ["ignore", "pipe", "ignore"],
+      stdio: ["ignore", "pipe", "pipe"],
     })
     let out = ""
+    let err = ""
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      child.kill("SIGKILL")
+    }, timeoutMs)
     child.stdout?.on("data", (chunk: Buffer) => {
       out += chunk.toString()
     })
-    child.once("error", reject)
-    child.once("close", () => resolve(out))
+    child.stderr?.on("data", (chunk: Buffer) => {
+      err += chunk.toString()
+    })
+    child.once("error", (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+    child.once("close", (code) => {
+      clearTimeout(timer)
+      if (timedOut) {
+        reject(new Error(`ssh -G ${host} did not answer within ${timeoutMs / 1000} s`))
+      } else if (code !== 0) {
+        reject(new Error(err.trim() || `ssh -G ${host} exited with code ${code}`))
+      } else resolve(out)
+    })
   })
   const value = (key: string): string | null =>
     config.match(new RegExp(`^${key} (.+)$`, "m"))?.[1]?.trim() ?? null
@@ -72,10 +97,19 @@ export async function sshAddress(
  * use for `host` ({@link sshAddress}). macOS asks for Local
  * Network access only when the app itself connects; until then the ssh it
  * starts fails with "No route to host". The result of the connection does not
- * matter, so it always resolves.
+ * matter, so it always resolves: also when `ssh -G` fails or does not answer
+ * within `timeoutMs`, since the ssh commands that follow report ssh's errors
+ * themselves.
  */
-export async function openLocalNetworkAccess(access: RemoteAccess, host: string): Promise<void> {
-  const target = await sshAddress(access, host)
+export async function openLocalNetworkAccess(
+  access: RemoteAccess,
+  host: string,
+  timeoutMs: number,
+): Promise<void> {
+  const target = await sshAddress(access, host, timeoutMs).then(
+    (found) => found,
+    () => null,
+  )
   if (target === null) return
   const { address, port } = target
   await new Promise<void>((resolve) => {

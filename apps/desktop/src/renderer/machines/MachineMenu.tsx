@@ -9,7 +9,7 @@ import {
   MonitorUp,
   MonitorX,
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { usePopupDismiss } from "../components/usePopupDismiss"
 import { useInterfaceLanguage, useTranslate } from "../i18n/language"
 import { useMachineFilter } from "../preferences/preferences"
@@ -49,8 +49,12 @@ const LOCAL_SERVER_LABELS = {
 
 type MenuView = "menu" | "card" | "remove"
 
+/** Space kept between the menu (or card) and the window's edge. */
+const WINDOW_MARGIN = 4
+
 /**
- * The right-click menu of a machine in the Machines group, at the pointer:
+ * The right-click menu of a machine in the Machines group, at the pointer
+ * (kept inside the window):
  * Machine settings, Show its projects, Reconnect, Update (only when the
  * machine is behind this app), Machine card and Remove machine (asks first).
  * Reconnect and Update errors, and a token Remove could not revoke, go to
@@ -77,6 +81,18 @@ export function MachineMenu({
   const [view, setView] = useState<MenuView>("menu")
   const rootRef = useRef<HTMLDivElement | null>(null)
   usePopupDismiss(view !== "remove", [rootRef], onClose)
+  // At the pointer, shifted left/up only as far as needed to stay inside the
+  // window (the Machines group is at the bottom of the sidebar). Measured
+  // again when the menu turns into the taller Machine card.
+  const [placement, setPlacement] = useState(position)
+  useLayoutEffect(() => {
+    if (view === "remove" || rootRef.current === null) return
+    const { width, height } = rootRef.current.getBoundingClientRect()
+    setPlacement({
+      x: Math.max(WINDOW_MARGIN, Math.min(position.x, window.innerWidth - width - WINDOW_MARGIN)),
+      y: Math.max(WINDOW_MARGIN, Math.min(position.y, window.innerHeight - height - WINDOW_MARGIN)),
+    })
+  }, [position.x, position.y, view])
   const { machineId } = machine
   const refreshMachines = () => void queryClient.invalidateQueries({ queryKey: MACHINES_QUERY_KEY })
   const reconnect = useMutation({
@@ -145,7 +161,7 @@ export function MachineMenu({
     <div
       ref={rootRef}
       className="fixed z-50"
-      style={{ left: position.x, top: position.y }}
+      style={{ left: placement.x, top: placement.y }}
       data-machine-id={machineId}
     >
       {view === "card" ? (

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, test } from "vitest"
@@ -56,4 +56,18 @@ test("follows Include lines (relative to the config's folder, globs, absolute pa
 test("a missing ssh config gives no hosts", () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-lab-ssh-config-"))
   expect(readSshConfigHosts(join(dir, "config"))).toEqual([])
+})
+
+test("an unreadable Include file is skipped; the other hosts are still listed", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-lab-ssh-config-"))
+  writeFileSync(join(dir, "locked"), "Host locked-host\n")
+  chmodSync(join(dir, "locked"), 0o000)
+  writeFileSync(join(dir, "config"), "Include locked\nHost main-host\n")
+  expect(readSshConfigHosts(join(dir, "config"))).toEqual(["main-host"])
+})
+
+test("a trailing # comment on a Host line is not read as host names", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-lab-ssh-config-"))
+  writeFileSync(join(dir, "config"), "Host a b # my boxes\nHost c#d\n")
+  expect(readSshConfigHosts(join(dir, "config"))).toEqual(["a", "b", "c#d"])
 })

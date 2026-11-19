@@ -20,6 +20,7 @@ import {
   probeRemote,
   type RemoteAccess,
   runRemote,
+  SSH_CONFIG_TIMEOUT_MS,
   SSH_TIMEOUT_MS,
   shellQuote,
   sshAddress,
@@ -295,7 +296,11 @@ export class MachineConnections {
 
   /** The address and port ssh connects to for the machine ("host:port"), or null when ssh names none. */
   async address(machineId: string): Promise<string | null> {
-    const target = await sshAddress(this.#options.access, this.#get(machineId).stored.sshHost)
+    const target = await sshAddress(
+      this.#options.access,
+      this.#get(machineId).stored.sshHost,
+      SSH_CONFIG_TIMEOUT_MS,
+    )
     return target === null ? null : `${target.address}:${target.port}`
   }
 
@@ -383,7 +388,7 @@ export class MachineConnections {
   ): Promise<MachineSummary> {
     const { access, deviceName } = this.#options
     onProgress({ step: "connecting", sentBytes: 0, totalBytes: 0 })
-    await openLocalNetworkAccess(access, input.sshHost)
+    await openLocalNetworkAccess(access, input.sshHost, SSH_CONFIG_TIMEOUT_MS)
     const probe = await probeRemote(access, input.sshHost)
     if (probe.system === "Linux") {
       throw new Error("Linux machines come in step 3 of multi-machine PI Lab")

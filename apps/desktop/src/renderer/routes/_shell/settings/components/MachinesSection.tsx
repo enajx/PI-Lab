@@ -12,6 +12,7 @@ import {
   DEVICE_SETTINGS_QUERY_KEY,
   forgetCachedProjects,
   MACHINES_QUERY_KEY,
+  MACHINES_REFRESH_MS,
   MachineScope,
   type MachineSummary,
   showMachineUi,
@@ -24,8 +25,6 @@ import { useTRPC } from "../../../../trpc/react"
 import { useServerCapability } from "../../../../trpc/serverCapabilities"
 import { SelectField, SettingsSection, TextField, ToggleField } from "./SettingsControls"
 
-/** How often the page reads the machines' state from Electron main (errors of the last attempt). */
-const MACHINES_REFRESH_MS = 2_000
 /** How often the Add machine form reads the step of the running add. */
 const ADD_PROGRESS_REFRESH_MS = 300
 
@@ -447,7 +446,7 @@ function AddMachineForm() {
     enabled: add.isPending,
     refetchInterval: ADD_PROGRESS_REFRESH_MS,
   })
-  if (hosts.isError) throw hosts.error
+  // The suggestions are optional: when they cannot be read the field offers none.
   const known = hosts.data ?? []
   // Choosing a Host from ~/.ssh/config fills an empty Name (or the one it filled before) with it.
   const chooseHost = (next: string) => {

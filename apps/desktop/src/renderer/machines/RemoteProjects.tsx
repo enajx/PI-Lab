@@ -20,14 +20,16 @@ import { projectRoute } from "./projectRoute"
  * same card as a local project, inside the machine's {@link MachineScope}, so
  * its cover, agents line, buttons and milestone dots read and change the
  * project on that machine's server. Not draggable (the saved order is this
- * Mac's).
+ * Mac's). Hidden projects show only with `showHidden` (the Show hidden toggle).
  */
 export function RemoteProjectCards({
   machine,
   projects,
+  showHidden,
 }: {
   machine: MachineSummary
   projects: ProjectListItem[]
+  showHidden: boolean
 }) {
   const state = useMachineState(machine.machineId)
   const offline = state === "disconnected"
@@ -37,7 +39,7 @@ export function RemoteProjectCards({
     <MachineScope machineId={machineId}>
       <ProjectActivityProvider>
         {projects
-          .filter((project) => !project.archivedAt)
+          .filter((project) => showHidden || !project.archivedAt)
           .map((project) => (
             <ResizableCardGridItem
               key={`${machineId}/${project.id}`}
@@ -57,23 +59,28 @@ export function RemoteProjectCards({
   )
 }
 
-/** One machine's projects as sidebar rows (after this Mac's own rows). */
+/**
+ * One machine's projects as sidebar rows (after this Mac's own rows). Hidden
+ * projects show only with `showHidden`, faded like this Mac's hidden rows.
+ */
 export function RemoteProjectRows({
   machine,
   projects,
   collapsed,
   activeProjectId,
+  showHidden,
 }: {
   machine: MachineSummary
   projects: ProjectListItem[]
   collapsed: boolean
   activeProjectId: string | null
+  showHidden: boolean
 }) {
   const t = useTranslate()
   const state = useMachineState(machine.machineId)
   const offline = state === "disconnected"
   return projects
-    .filter((project) => !project.archivedAt)
+    .filter((project) => showHidden || !project.archivedAt)
     .map((project) => {
       const active = activeProjectId === project.id
       return (
@@ -85,11 +92,13 @@ export function RemoteProjectRows({
           data-machine-id={machine.machineId}
           data-offline={offline}
           data-active={active}
+          data-hidden={Boolean(project.archivedAt)}
           title={offline ? `${machine.name}: ${t("Disconnected")}` : project.repoPath}
           className={cn(
             "flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent hover:text-accent-foreground",
             collapsed && "justify-center px-0",
             active && "bg-accent text-accent-foreground",
+            project.archivedAt && "opacity-60",
             offline && "opacity-50 grayscale",
           )}
         >
@@ -110,4 +119,13 @@ export function RemoteProjectRows({
         </Link>
       )
     })
+}
+
+/** How many of the machines' projects are hidden (for the Show hidden toggle). */
+export function remoteHiddenCount(remote: { projects: ProjectListItem[] }[]): number {
+  return remote.reduce(
+    (count, entry) =>
+      count + entry.projects.filter((project) => Boolean(project.archivedAt)).length,
+    0,
+  )
 }

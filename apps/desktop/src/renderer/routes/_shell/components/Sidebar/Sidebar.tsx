@@ -26,6 +26,7 @@ import { localServerOff } from "../../../../machines/localServer"
 import { CONNECTION_LABELS, machineIcon } from "../../../../machines/MachineControls"
 import { MachineMenu, useShowMachineProjects } from "../../../../machines/MachineMenu"
 import {
+  MACHINES_REFRESH_MS,
   type MachineProjects,
   type MachineSummary,
   showMachineUi,
@@ -33,7 +34,7 @@ import {
   useMachines,
   useRemoteProjects,
 } from "../../../../machines/machines"
-import { RemoteProjectRows } from "../../../../machines/RemoteProjects"
+import { RemoteProjectRows, remoteHiddenCount } from "../../../../machines/RemoteProjects"
 import {
   dismissNonGitNotice,
   SIDEBAR_MAX_WIDTH,
@@ -380,14 +381,18 @@ export function Sidebar() {
   const localProjects = localOff ? [] : projectsQuery.data
   const projectActivityStates = useProjectActivityStates()
   // Remote machines: their projects follow this Mac's, each with a machine label.
-  const machines = useMachines(false) ?? []
+  // Read again every few seconds, so the Machines group shows an update that is
+  // available or running also while Settings is closed.
+  const machineList = useMachines(MACHINES_REFRESH_MS)
+  const machines = machineList ?? []
   const remote = useRemoteProjects(machines)
   const routeParams = useParams({ strict: false }) as { machineId?: string; projectId?: string }
   const projects = localProjects ?? []
+  // This Mac's hidden projects and the machines' (both show with Show hidden).
   const hiddenCount =
-    localProjects === undefined
+    localProjects === undefined || machineList === null
       ? null
-      : projects.filter((project) => Boolean(project.archivedAt)).length
+      : projects.filter((project) => Boolean(project.archivedAt)).length + remoteHiddenCount(remote)
   const [collapsed, setCollapsed] = useSidebarCollapsed()
   const [width, setWidth] = useSidebarWidth()
   const [showFeatureHelp, setShowFeatureHelp] = useSidebarFeatureHelp()
@@ -558,6 +563,7 @@ export function Sidebar() {
               machine={entry.machine}
               projects={entry.projects}
               collapsed={collapsed}
+              showHidden={showHidden}
               activeProjectId={
                 routeParams.machineId === entry.machine.machineId
                   ? (routeParams.projectId ?? null)
@@ -626,7 +632,9 @@ export function Sidebar() {
         <MachineMenu
           key={machineMenu.machineId}
           machine={machineMenuEntry.machine}
-          projectCount={machineMenuEntry.projects.length}
+          projectCount={
+            machineMenuEntry.projects.filter((project) => showHidden || !project.archivedAt).length
+          }
           position={{ x: machineMenu.x, y: machineMenu.y }}
           onClose={() => setMachineMenu(null)}
           onError={setActionError}
@@ -637,6 +645,7 @@ export function Sidebar() {
         <EditProjectDialog
           project={editingProject}
           mode="edit"
+          canPickPaperFolder
           pending={updateDetails.isPending}
           error={updateDetails.error?.message ?? null}
           onClose={() => setEditingProjectId(null)}

@@ -254,12 +254,15 @@ export function ProjectCard({ project, machine }: ProjectCardProps) {
     : null
 
   // Persist the default (or the recolor) exactly once: the mutation refreshes the
-  // list, after which the stored palette matches and this no longer fires.
+  // list, after which the stored palette matches and this no longer fires. A
+  // remote card of a disconnected machine (shown from the cached list) waits
+  // until the machine is back.
   const persistDefault = setGradient.mutate
+  const machineOffline = machine?.offline === true
   useEffect(() => {
-    if (!defaultGradient) return
+    if (!defaultGradient || machineOffline) return
     persistDefault({ id: project.id, gradient: defaultGradient })
-  }, [defaultGradient, project.id, persistDefault])
+  }, [defaultGradient, machineOffline, project.id, persistDefault])
 
   const generateGradient = () => {
     artworkGenerationRef.current += 1
@@ -640,6 +643,7 @@ export function ProjectCard({ project, machine }: ProjectCardProps) {
           project={project}
           onClose={() => setEditing(false)}
           mode="edit"
+          canPickPaperFolder={machine === null}
           pending={updateDetails.isPending}
           error={updateDetails.error?.message ?? null}
           onSave={saveDetails}

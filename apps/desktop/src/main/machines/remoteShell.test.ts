@@ -3,7 +3,7 @@ import { type AddressInfo, createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, test } from "vitest"
-import { openLocalNetworkAccess, type RemoteAccess, runRemote } from "./remoteShell"
+import { openLocalNetworkAccess, type RemoteAccess, runRemote, sshAddress } from "./remoteShell"
 
 /** A stand-in ssh that fails like macOS does when the app has no Local Network access. */
 test("an ssh 'No route to host' error points to the Local Network setting", async () => {
@@ -36,7 +36,7 @@ test("the app opens its own connection to the machine's ssh address", async () =
   writeFileSync(ssh, `#!/bin/sh\nprintf 'user me\\nhostname 127.0.0.1\\nport ${port}\\n'\n`)
   chmodSync(ssh, 0o755)
   const access = { sshPath: ssh, extraSshArgs: [] } as unknown as RemoteAccess
-  await openLocalNetworkAccess(access, "my-alias")
+  await openLocalNetworkAccess(access, "my-alias", 5_000)
   await connected
   server.close()
 })
@@ -65,4 +65,25 @@ test("a slow ssh command that keeps making progress is not killed by the time li
   const ssh = fakeSsh("for i in 1 2 3 4 5 6; do echo tick; sleep 0.3; done")
   const access = { sshPath: ssh, extraSshArgs: [] } as unknown as RemoteAccess
   await expect(runRemote(access, "me@host", "true", null, 1_000)).resolves.toContain("tick")
+})
+
+/** `ssh -G` that fails: its error text, not "no address". */
+test("a failing ssh -G rejects with ssh's error text", async () => {
+  const ssh = fakeSsh("echo 'Bad configuration option: foo' >&2\nexit 255")
+  const access = { sshPath: ssh, extraSshArgs: [] } as unknown as RemoteAccess
+  await expect(sshAddress(access, "box", 5_000)).rejects.toThrow(/Bad configuration option: foo/)
+})
+
+/** `ssh -G` that hangs is killed after the time limit. */
+test("a hung ssh -G is stopped after the time limit", async () => {
+  const ssh = fakeSsh("exec sleep 30")
+  const access = { sshPath: ssh, extraSshArgs: [] } as unknown as RemoteAccess
+  await expect(sshAddress(access, "box", 300)).rejects.toThrow(/did not answer/)
+})
+
+/** Add's Local Network touch does not wait on a hung `ssh -G`. */
+test("the Local Network touch gives up on a hung ssh -G", async () => {
+  const ssh = fakeSsh("exec sleep 30")
+  const access = { sshPath: ssh, extraSshArgs: [] } as unknown as RemoteAccess
+  await openLocalNetworkAccess(access, "box", 300)
 })

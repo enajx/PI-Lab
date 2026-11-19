@@ -29,7 +29,7 @@ import {
 } from "../../../../../machines/MachineControls"
 import { showMachineUi, useMachines, useRemoteProjects } from "../../../../../machines/machines"
 import { projectRoute } from "../../../../../machines/projectRoute"
-import { RemoteProjectCards } from "../../../../../machines/RemoteProjects"
+import { RemoteProjectCards, remoteHiddenCount } from "../../../../../machines/RemoteProjects"
 import {
   useMachineFilter,
   useShowHiddenProjects,
@@ -115,17 +115,19 @@ export function Dashboard() {
   const localProjects = localOff ? [] : projectsQuery.data
   const [collapsed] = useSidebarCollapsed()
   // Remote machines: their projects follow this Mac's, each with a machine label.
-  const machines = useMachines(false) ?? []
+  const machineList = useMachines(false)
+  const machines = machineList ?? []
   const remote = useRemoteProjects(machines)
   const [machineFilterValue, setMachineFilter] = useMachineFilter()
   const machineFilter = effectiveFilter(machineFilterValue, machines)
   const showLocal = filterShows(machineFilter, null)
 
   const projects = localProjects ?? []
+  // This Mac's hidden projects and the machines' (both show with Show hidden).
   const hiddenCount =
-    localProjects === undefined
+    localProjects === undefined || machineList === null
       ? null
-      : projects.filter((project) => Boolean(project.archivedAt)).length
+      : projects.filter((project) => Boolean(project.archivedAt)).length + remoteHiddenCount(remote)
   const [showHidden, setShowHidden] = useShowHiddenProjects(hiddenCount)
   const visibleProjects = !showLocal
     ? []
@@ -241,6 +243,7 @@ export function Dashboard() {
                 key={entry.machine.machineId}
                 machine={entry.machine}
                 projects={entry.projects}
+                showHidden={showHidden}
               />
             ))}
           <AddProjectMenu

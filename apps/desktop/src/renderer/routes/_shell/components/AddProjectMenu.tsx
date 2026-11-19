@@ -916,6 +916,7 @@ function AddProjectMenuBody({
       {setup ? (
         <EditProjectDialog
           mode="add"
+          canPickPaperFolder
           project={{ name: setup.name, typeId: "general", metadata: null, agentConfig: null }}
           pending={pending}
           error={error ? translateKnownError(language, error.message) : null}
