@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "bun@1.3.0",
   "workspaces": [
-    "apps/*",
+    "apps/desktop",
     "packages/*",
     "tooling/*"
   ],

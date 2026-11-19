@@ -1,0 +1,13 @@
+# Dependencies and build output of the PI Lab phone app.
+node_modules/
+.expo/
+dist/
+expo-env.d.ts
+.metro-health-check*
+# Native projects from `expo prebuild`, made again by scripts/build-android.sh.
+ios/
+android/
+# The built APK (scripts/build-android.sh copies it here).
+build-output/
+# The lockfile is kept (the root .gitignore ignores package-lock.json).
+!package-lock.json
