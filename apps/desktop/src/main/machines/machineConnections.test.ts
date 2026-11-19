@@ -61,18 +61,24 @@ function withMachines(machines: StoredMachine[]): void {
     behindPolicy: "auto",
     localServer: "always",
     defaultMachine: null,
+    multiMachine: machines.length > 0,
   })
 }
 
 test("the Local server setting and the default machine are saved and read back after a restart", () => {
   withMachines([lab, gpu])
   const first = connections()
-  expect(first.deviceSettings()).toEqual({ localServer: "always", defaultMachine: null })
+  expect(first.deviceSettings()).toEqual({
+    localServer: "always",
+    defaultMachine: null,
+    multiMachine: true,
+  })
   first.setDefaultMachine(gpu.machineId)
   first.setLocalServer("while-open")
   expect(connections().deviceSettings()).toEqual({
     localServer: "while-open",
     defaultMachine: gpu.machineId,
+    multiMachine: true,
   })
   expect(readMachineFile(profileDir).machines).toEqual([lab, gpu])
 })
@@ -85,7 +91,11 @@ test("with the local server off the default cannot be this Mac", () => {
   machines.setDefaultMachine(lab.machineId)
   machines.setLocalServer("off")
   expect(() => machines.setDefaultMachine(null)).toThrow("local server is off")
-  expect(machines.deviceSettings()).toEqual({ localServer: "off", defaultMachine: lab.machineId })
+  expect(machines.deviceSettings()).toEqual({
+    localServer: "off",
+    defaultMachine: lab.machineId,
+    multiMachine: true,
+  })
 })
 
 test("an unknown machine cannot be the default", () => {
@@ -107,4 +117,21 @@ test("removing the default machine makes this Mac the default, or another machin
   await off.remove(lab.machineId)
   expect(off.deviceSettings().defaultMachine).toBe(gpu.machineId)
   expect(readMachineFile(profileDir).defaultMachine).toBe(gpu.machineId)
+})
+
+test("multi-machine is off for a new device, can be turned on and off, and cannot be turned off while a machine is added", async () => {
+  const fresh = connections()
+  expect(fresh.deviceSettings().multiMachine).toBe(false)
+  fresh.setMultiMachine(true)
+  expect(connections().deviceSettings().multiMachine).toBe(true)
+  fresh.setMultiMachine(false)
+  expect(readMachineFile(profileDir).multiMachine).toBe(false)
+
+  withMachines([lab])
+  const added = connections()
+  expect(() => added.setMultiMachine(false)).toThrow("Remove all machines")
+  expect(added.deviceSettings().multiMachine).toBe(true)
+  await added.remove(lab.machineId)
+  added.setMultiMachine(false)
+  expect(connections().deviceSettings().multiMachine).toBe(false)
 })

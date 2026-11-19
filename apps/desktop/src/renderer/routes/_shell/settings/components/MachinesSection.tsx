@@ -32,7 +32,10 @@ const MACHINES_REFRESH_MS = 2_000
 export function MachinesSection() {
   const t = useTranslate()
   const machines = useMachines(MACHINES_REFRESH_MS)
+  const settings = useDeviceMachineSettings()
   const [notice, setNotice] = useState<string | null>(null)
+  // While multi-machine is off the section shows only the toggle and Local server.
+  const multiMachine = settings?.multiMachine === true
   return (
     <div className="flex flex-col gap-8">
       <SettingsSection
@@ -40,7 +43,10 @@ export function MachinesSection() {
         title="Machines"
         description="Other computers whose PI Lab server this app connects to over SSH."
       >
-        {machines === null ? null : machines.length === 0 ? (
+        {settings === null || machines === null ? null : (
+          <MultiMachineField on={multiMachine} locked={machines.length > 0} />
+        )}
+        {machines === null || !multiMachine ? null : machines.length === 0 ? (
           <p
             data-testid="settings-machines-empty"
             className="px-4 py-3 text-muted-foreground text-sm"
@@ -72,11 +78,49 @@ export function MachinesSection() {
           </p>
         ) : null}
         <LocalServerFields machines={machines ?? []} />
-        <BehindPolicyField />
-        <AddMachineForm />
+        {multiMachine ? (
+          <>
+            <BehindPolicyField />
+            <AddMachineForm />
+          </>
+        ) : null}
       </SettingsSection>
-      {localServerOff() ? null : <ThisMacDevices />}
+      {localServerOff() || !multiMachine ? null : <ThisMacDevices />}
     </div>
+  )
+}
+
+/**
+ * The multi-machine toggle. Adding a machine turns it on, and it stays on
+ * (locked) while any machine is added; Electron main refuses Off then too.
+ */
+function MultiMachineField({ on, locked }: { on: boolean; locked: boolean }) {
+  const queryClient = useQueryClient()
+  const save = useMutation({
+    mutationFn: (next: boolean) =>
+      desktopIpc().desktop.machines.setMultiMachine.mutate({ on: next }),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: DEVICE_SETTINGS_QUERY_KEY }),
+  })
+  return (
+    <>
+      <ToggleField
+        testId="settings-multi-machine"
+        label="Multi-machine"
+        description={
+          locked
+            ? "On while a machine is added. Remove all machines to turn it off."
+            : "Use projects on other computers over SSH. Off: PI Lab shows only this Mac."
+        }
+        checked={on || locked}
+        disabled={locked || save.isPending}
+        onChange={(next) => save.mutate(next)}
+      />
+      {save.error ? (
+        <p role="alert" className="px-4 py-3 text-destructive text-xs">
+          {save.error.message}
+        </p>
+      ) : null}
+    </>
   )
 }
 

@@ -29,15 +29,36 @@ const machine: StoredMachine = {
   addedAt: 1_700_000_000_000,
 }
 
-const defaults = { behindPolicy: "auto", localServer: "always", defaultMachine: null } as const
+const defaults = {
+  behindPolicy: "auto",
+  localServer: "always",
+  defaultMachine: null,
+  multiMachine: false,
+} as const
 
-test("no machines.json means no machines, machines behind this app are updated automatically, the local server always runs and this Mac is the default machine", () => {
+test("no machines.json means no machines, machines behind this app are updated automatically, the local server always runs, this Mac is the default machine and multi-machine is off", () => {
   expect(readMachineFile(profileDir)).toEqual({ machines: [], ...defaults })
 })
 
-test("a machines.json from before the behind policy reads with the defaults", () => {
+test("a machines.json from before the behind policy reads with the defaults, multi-machine on as a machine is added", () => {
   writeFileSync(join(profileDir, MACHINES_FILE), JSON.stringify([machine]), { mode: 0o600 })
-  expect(readMachineFile(profileDir)).toEqual({ machines: [machine], ...defaults })
+  expect(readMachineFile(profileDir)).toEqual({
+    machines: [machine],
+    ...defaults,
+    multiMachine: true,
+  })
+})
+
+test("a machines.json from before the multi-machine toggle reads it on only when a machine is added", () => {
+  const path = join(profileDir, MACHINES_FILE)
+  const old = { behindPolicy: "auto", localServer: "always", defaultMachine: null }
+  writeFileSync(path, JSON.stringify({ ...old, machines: [] }), { mode: 0o600 })
+  expect(readMachineFile(profileDir).multiMachine).toBe(false)
+  writeFileSync(path, JSON.stringify({ ...old, machines: [machine] }), { mode: 0o600 })
+  expect(readMachineFile(profileDir).multiMachine).toBe(true)
+  // Off with a machine added is read as on (locked on while any machine is added).
+  writeFileSync(path, JSON.stringify({ ...old, machines: [machine], multiMachine: false }))
+  expect(readMachineFile(profileDir).multiMachine).toBe(true)
 })
 
 test("a machines.json from before the local server setting reads with Always and this Mac", () => {
@@ -50,6 +71,7 @@ test("a machines.json from before the local server setting reads with Always and
     ...defaults,
     machines: [machine],
     behindPolicy: "ask",
+    multiMachine: true,
   })
 })
 
@@ -59,6 +81,7 @@ test("machines are written owner-only and atomically, and read back the same", (
     behindPolicy: "ask",
     localServer: "off",
     defaultMachine: machine.machineId,
+    multiMachine: true,
   }
   writeMachineFile(profileDir, written)
   const path = join(profileDir, MACHINES_FILE)
@@ -71,6 +94,7 @@ test("machines are written owner-only and atomically, and read back the same", (
     machines: [],
     behindPolicy: "never",
     localServer: "while-open",
+    multiMachine: true,
   }
   writeMachineFile(profileDir, next)
   expect(readMachineFile(profileDir)).toEqual(next)

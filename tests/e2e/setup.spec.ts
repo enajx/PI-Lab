@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -26,6 +26,8 @@ async function launch(): Promise<ElectronApplication> {
       ...process.env,
       PI_LAB_TEST_MODE: "1",
       PI_LAB_TEST_FIRST_RUN: "1",
+      // Windows do not take focus on the developer's screen.
+      PI_LAB_TEST_HIDE_WINDOWS: "1",
       PI_LAB_DATA_DIR: dataDir,
       PI_LAB_SOCKET_PATH: join(dataDir, "daemon.sock"),
     },
@@ -104,6 +106,28 @@ test("first-run setup window fits the wizard content and is restored after Finis
     .poll(async () => window.evaluate(() => innerWidth), { timeout: 10_000 })
     .toBeGreaterThanOrEqual(1270)
   expect(await window.evaluate(() => innerHeight)).toBeGreaterThanOrEqual(760)
+})
+
+test("multi-machine is off in the wizard; turned on, Finish saves it and Settings shows Add machine", async () => {
+  if (!app) throw new Error("Electron app did not launch")
+  const window = await app.firstWindow()
+
+  await expect(window.getByTestId("first-run-setup")).toBeVisible({ timeout: 30_000 })
+  const choice = window.getByTestId("setup-multi-machine")
+  await expect(choice).toHaveAttribute("aria-checked", "false")
+  await expect(choice).toBeEnabled()
+  await choice.click()
+  await expect(choice).toHaveAttribute("aria-checked", "true")
+  await window.getByTestId("first-run-setup-finish").click()
+  await expect(window.getByTestId("dashboard")).toBeVisible({ timeout: 30_000 })
+  const file = JSON.parse(await readFile(join(dataDir, "machines.json"), "utf8")) as {
+    multiMachine: boolean
+  }
+  expect(file.multiMachine).toBe(true)
+  await window.getByTestId("nav-settings").click()
+  await window.getByTestId("settings-nav-machines").click()
+  await expect(window.getByTestId("settings-multi-machine")).toHaveAttribute("aria-checked", "true")
+  await expect(window.getByTestId("settings-add-machine")).toBeVisible()
 })
 
 test("first-launch setup is skippable", async () => {

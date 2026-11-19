@@ -48,6 +48,8 @@ export interface MachineFile {
   localServer: LocalServerMode
   /** The machine New project is preset to: a stored machine id, or null for this Mac. */
   defaultMachine: string | null
+  /** The multi-machine toggle (machine UI and Add machine); always on while a machine is added. */
+  multiMachine: boolean
 }
 
 /** Files written before a setting existed read with its default. */
@@ -56,18 +58,21 @@ const machineFileSchema = z.object({
   behindPolicy: behindPolicySchema.default("auto"),
   localServer: localServerModeSchema.default("always"),
   defaultMachine: z.string().min(1).nullable().default(null),
+  multiMachine: z.boolean().optional(),
 })
 
 /**
  * The stored machines and this device's machine settings; the defaults
- * (none, "auto", "always", this Mac) when the file does not exist. An older
- * file holding only the machines array reads with the defaults. Throws on a
- * file others can read or a broken file.
+ * (none, "auto", "always", this Mac, multi-machine off) when the file does not
+ * exist. An older file holding only the machines array reads with the
+ * defaults. Multi-machine reads on whenever a machine is added (also in a file
+ * from before the toggle). Throws on a file others can read or a broken file.
  */
 export function readMachineFile(profileDir: string): MachineFile {
   const path = join(profileDir, MACHINES_FILE)
   const parsed: unknown = existsSync(path) ? readOwnerOnlyJson(path) : { machines: [] }
-  return machineFileSchema.parse(Array.isArray(parsed) ? { machines: parsed } : parsed)
+  const file = machineFileSchema.parse(Array.isArray(parsed) ? { machines: parsed } : parsed)
+  return { ...file, multiMachine: file.machines.length > 0 || file.multiMachine === true }
 }
 
 function readOwnerOnlyJson(path: string): unknown {

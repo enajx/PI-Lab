@@ -83,6 +83,10 @@ export function createDesktopRouter(deps: DesktopRouterDependencies) {
         setDefaultMachine: publicProcedure
           .input(z.object({ machineId: z.string().min(1).nullable() }))
           .mutation(({ input }) => deps.machines().setDefaultMachine(input.machineId)),
+        /** The multi-machine toggle (refused off while a machine is added). */
+        setMultiMachine: publicProcedure
+          .input(z.object({ on: z.boolean() }))
+          .mutation(({ input }) => deps.machines().setMultiMachine(input.on)),
         /**
          * The local port that reaches `port` on the machine's 127.0.0.1 (a
          * notebook or marimo server its PI Lab server started), for a frame here.

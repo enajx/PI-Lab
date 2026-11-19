@@ -9,9 +9,15 @@ import {
   useInterfaceLanguage,
   useTranslate,
 } from "../i18n/language"
+import {
+  DEVICE_SETTINGS_QUERY_KEY,
+  useDeviceMachineSettings,
+  useMachines,
+} from "../machines/machines"
 import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from "../notifications/sounds"
 import { useDefaultAgentId } from "../preferences/preferences"
 import { type ThemeMode, useTheme } from "../providers/ThemeProvider"
+import { desktopIpc } from "../trpc/client"
 import { useTRPC, useTRPCClient } from "../trpc/react"
 
 interface FirstRunSetupProps {
@@ -156,6 +162,18 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
   const [startAtLoginChoice, setStartAtLoginChoice] = useState(true)
   const loginAvailable = startAtLogin.data !== undefined && startAtLogin.data.available !== false
 
+  /** Multi-machine: off for a new device; saved only when setup finishes. Locked on while a machine is added. */
+  const deviceSettings = useDeviceMachineSettings()
+  const machines = useMachines(false)
+  const multiMachineLocked = (machines ?? []).length > 0
+  const [multiMachineTouched, setMultiMachineTouched] = useState<boolean | null>(null)
+  const multiMachineChoice =
+    multiMachineLocked || (multiMachineTouched ?? deviceSettings?.multiMachine === true)
+  const setMultiMachine = useMutation({
+    mutationFn: (on: boolean) => desktopIpc().desktop.machines.setMultiMachine.mutate({ on }),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: DEVICE_SETTINGS_QUERY_KEY }),
+  })
+
   const chooseAgent = (agentId: HarnessId) => {
     setSelectionTouched(true)
     setSelectedAgent((current) => (current === agentId ? null : agentId))
@@ -168,6 +186,9 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
         if (!ok) return
         if (loginAvailable && startAtLogin.data?.enabled !== startAtLoginChoice) {
           await setStartAtLogin.mutateAsync({ enabled: startAtLoginChoice })
+        }
+        if (deviceSettings !== null && deviceSettings.multiMachine !== multiMachineChoice) {
+          await setMultiMachine.mutateAsync(multiMachineChoice)
         }
         await complete.mutateAsync({ sound: completionSound })
         await queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() })
@@ -208,6 +229,7 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
     updateGeneral.error ??
     startAtLogin.error ??
     setStartAtLogin.error ??
+    setMultiMachine.error ??
     saveApiKey.error ??
     updateAgents.error ??
     (defaultAgentError ? new Error(defaultAgentError) : null) ??
@@ -430,7 +452,42 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
             </div>
           </section>
 
-          <div className="grid gap-2.5 sm:grid-cols-2">
+          <div className="grid gap-2.5 sm:grid-cols-3">
+            <section
+              data-testid="first-run-multi-machine-card"
+              className="flex flex-col gap-1 rounded-lg border border-border bg-card p-3 text-xs"
+            >
+              <h2 className="font-medium text-sm">{t("Multi-machine")}</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label={t("Multi-machine")}
+                  aria-checked={multiMachineChoice}
+                  data-testid="setup-multi-machine"
+                  disabled={deviceSettings === null || multiMachineLocked}
+                  onClick={() => setMultiMachineTouched(!multiMachineChoice)}
+                  className={cn(
+                    "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full disabled:opacity-50",
+                    multiMachineChoice ? "bg-primary" : "bg-muted",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "inline-block size-4 transform rounded-full bg-background shadow transition-transform",
+                      multiMachineChoice ? "translate-x-4" : "translate-x-0.5",
+                    )}
+                  />
+                </button>
+                <span className="text-[11px] text-muted-foreground">
+                  {multiMachineLocked
+                    ? t("On while a machine is added. Remove all machines to turn it off.")
+                    : t(
+                        "Use projects on other computers over SSH. Off: PI Lab shows only this Mac.",
+                      )}
+                </span>
+              </div>
+            </section>
             <section
               data-testid="first-run-start-at-login-card"
               className="flex flex-col gap-1 rounded-lg border border-border bg-card p-3 text-xs"
@@ -516,7 +573,8 @@ export function FirstRunSetup({ onClose }: FirstRunSetupProps) {
                 saveApiKey.isPending ||
                 updateGeneral.isPending ||
                 updateAgents.isPending ||
-                setStartAtLogin.isPending
+                setStartAtLogin.isPending ||
+                setMultiMachine.isPending
               }
             >
               {t("Finish setup")}

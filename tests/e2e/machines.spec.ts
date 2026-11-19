@@ -175,6 +175,7 @@ interface MachineFile {
   behindPolicy: string
   localServer: string
   defaultMachine: string | null
+  multiMachine: boolean
 }
 
 /** What `machines.json` in the app profile holds. */
@@ -186,11 +187,19 @@ async function storedMachines(): Promise<StoredMachine[]> {
   return (await machineFile()).machines
 }
 
-/** Open Settings > Machines. */
-async function openMachinesSettings(page: Page): Promise<void> {
+/** Open Settings > Machines, with multi-machine as it is. */
+async function openMachinesToggle(page: Page): Promise<void> {
   await page.getByTestId("nav-settings").click()
   await page.getByTestId("settings-nav-machines").click()
   await expect(page.getByTestId("settings-section-machines")).toBeVisible()
+}
+
+/** Open Settings > Machines and turn multi-machine on when it is off. */
+async function openMachinesSettings(page: Page): Promise<void> {
+  await openMachinesToggle(page)
+  const toggle = page.getByTestId("settings-multi-machine")
+  if ((await toggle.getAttribute("aria-checked")) === "false") await toggle.click()
+  await expect(page.getByTestId("settings-add-machine")).toBeVisible()
 }
 
 /** Add a machine with the Settings > Machines form and wait until it is connected. */
@@ -204,6 +213,50 @@ async function addMachine(page: Page, sshHost: string, name: string): Promise<vo
   const row = page.getByTestId("settings-machine").filter({ hasText: name })
   await expect(row).toHaveAttribute("data-state", "connected", { timeout: 60_000 })
 }
+
+test("multi-machine toggle: off on a fresh app with no machine UI; on shows Add machine; locked on while a machine is added; off again hides it", async () => {
+  test.setTimeout(120_000)
+  const page = await launch({})
+  if (!sshd) throw new Error("not started")
+  await expect(page.getByTestId("dashboard")).toBeVisible()
+  await expect(page.getByTestId("dashboard-machine-filter")).toHaveCount(0)
+  await expect(page.getByTestId("sidebar-machine-filter")).toHaveCount(0)
+  await expect(page.getByTestId("sidebar-machines")).toHaveCount(0)
+
+  await openMachinesToggle(page)
+  const toggle = page.getByTestId("settings-multi-machine")
+  await expect(toggle).toHaveAttribute("aria-checked", "false")
+  await expect(page.getByTestId("settings-local-server")).toBeVisible()
+  await expect(page.getByTestId("settings-add-machine")).toHaveCount(0)
+  await expect(page.getByTestId("settings-machines-behind-policy")).toHaveCount(0)
+  await expect(page.getByTestId("settings-section-devices")).toHaveCount(0)
+
+  await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-checked", "true")
+  await expect(page.getByTestId("settings-add-machine")).toBeVisible()
+  await expect.poll(async () => (await machineFile()).multiMachine).toBe(true)
+
+  await addMachine(page, sshd.host, "Lab server")
+  await expect(toggle).toHaveAttribute("aria-checked", "true")
+  await expect(toggle).toBeDisabled()
+  await expect(page.getByTestId("settings-section-machines")).toContainText(
+    "On while a machine is added. Remove all machines to turn it off.",
+  )
+  await page.getByTestId("settings-back").click()
+  await expect(page.getByTestId("sidebar-machines")).toBeVisible()
+
+  await page.getByTestId("sidebar-add-machine").click()
+  await page.getByTestId("settings-machine-remove").click()
+  await expect(page.getByTestId("settings-machines-empty")).toBeVisible()
+  await expect(toggle).toBeEnabled()
+  await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-checked", "false")
+  await expect(page.getByTestId("settings-add-machine")).toHaveCount(0)
+  await expect.poll(async () => (await machineFile()).multiMachine).toBe(false)
+  await page.getByTestId("settings-back").click()
+  await expect(page.getByTestId("sidebar-machines")).toHaveCount(0)
+  await expect(page.getByTestId("sidebar-machine-filter")).toHaveCount(0)
+})
 
 test("tokens: adding a machine enrolls a device; removing it revokes the token on the remote", async () => {
   test.setTimeout(120_000)

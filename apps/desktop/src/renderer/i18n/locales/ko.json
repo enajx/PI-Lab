@@ -1396,5 +1396,8 @@
   "Skipped: ": "건너뜀: ",
   "Uploading…": "업로드 중…",
   "Downloading…": "다운로드 중…",
-  "Upload files from this Mac into ": "이 Mac의 파일을 다음 위치에 업로드: "
+  "Upload files from this Mac into ": "이 Mac의 파일을 다음 위치에 업로드: ",
+  "Multi-machine": "여러 머신",
+  "On while a machine is added. Remove all machines to turn it off.": "머신이 추가되어 있는 동안 켜져 있습니다. 끄려면 모든 머신을 제거하세요.",
+  "Use projects on other computers over SSH. Off: PI Lab shows only this Mac.": "SSH로 다른 컴퓨터의 프로젝트를 사용합니다. 끔: PI Lab은 이 Mac만 표시합니다."
 }

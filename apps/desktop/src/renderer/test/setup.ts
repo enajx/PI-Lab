@@ -74,4 +74,8 @@ afterEach(() => {
 
 // No Electron main in unit tests: no remote machines unless a test sets them.
 setMachinesSourceForTests(async () => [])
-setDeviceSettingsSourceForTests(async () => ({ localServer: "always", defaultMachine: null }))
+setDeviceSettingsSourceForTests(async () => ({
+  localServer: "always",
+  defaultMachine: null,
+  multiMachine: false,
+}))

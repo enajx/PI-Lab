@@ -1396,5 +1396,8 @@
   "Skipped: ": "已跳过：",
   "Uploading…": "正在上传…",
   "Downloading…": "正在下载…",
-  "Upload files from this Mac into ": "从这台 Mac 上传文件到 "
+  "Upload files from this Mac into ": "从这台 Mac 上传文件到 ",
+  "Multi-machine": "多机器",
+  "On while a machine is added. Remove all machines to turn it off.": "添加了机器时保持开启。移除所有机器后才能关闭。",
+  "Use projects on other computers over SSH. Off: PI Lab shows only this Mac.": "通过 SSH 使用其他电脑上的项目。关闭时：PI Lab 只显示这台 Mac。"
 }

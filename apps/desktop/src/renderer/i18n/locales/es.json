@@ -1396,5 +1396,8 @@
   "Skipped: ": "Omitidos: ",
   "Uploading…": "Subiendo…",
   "Downloading…": "Descargando…",
-  "Upload files from this Mac into ": "Subir archivos desde este Mac a "
+  "Upload files from this Mac into ": "Subir archivos desde este Mac a ",
+  "Multi-machine": "Varias máquinas",
+  "On while a machine is added. Remove all machines to turn it off.": "Activado mientras haya una máquina añadida. Quita todas las máquinas para desactivarlo.",
+  "Use projects on other computers over SSH. Off: PI Lab shows only this Mac.": "Usa proyectos en otros ordenadores por SSH. Desactivado: PI Lab muestra solo este Mac."
 }

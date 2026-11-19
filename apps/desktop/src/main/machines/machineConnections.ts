@@ -72,6 +72,8 @@ export interface MachineSummary {
 export interface DeviceMachineSettings {
   localServer: LocalServerMode
   defaultMachine: string | null
+  /** The multi-machine toggle; on while any machine is added. */
+  multiMachine: boolean
 }
 
 const REVOKE_TIMEOUT_MS = 5_000
@@ -147,6 +149,7 @@ export class MachineConnections {
   #behindPolicy: BehindPolicy
   #localServer: LocalServerMode
   #defaultMachine: string | null
+  #multiMachine: boolean
 
   constructor(options: MachineConnectionsOptions) {
     this.#options = options
@@ -154,6 +157,7 @@ export class MachineConnections {
     this.#behindPolicy = file.behindPolicy
     this.#localServer = file.localServer
     this.#defaultMachine = file.defaultMachine
+    this.#multiMachine = file.multiMachine
     for (const stored of file.machines) {
       this.#machines.set(stored.machineId, this.#live(stored))
     }
@@ -169,9 +173,22 @@ export class MachineConnections {
     this.#save()
   }
 
-  /** This device's "Local server" setting and default machine (null: this Mac), as saved. */
+  /** This device's "Local server" setting, default machine (null: this Mac) and multi-machine toggle, as saved. */
   deviceSettings(): DeviceMachineSettings {
-    return { localServer: this.#localServer, defaultMachine: this.#defaultMachine }
+    return {
+      localServer: this.#localServer,
+      defaultMachine: this.#defaultMachine,
+      multiMachine: this.#multiMachine,
+    }
+  }
+
+  /** Save the multi-machine toggle. Off is refused while any machine is added. */
+  setMultiMachine(on: boolean): void {
+    if (!on && this.#machines.size > 0) {
+      throw new Error("Remove all machines before turning multi-machine off")
+    }
+    this.#multiMachine = on
+    this.#save()
   }
 
   /** Save "Local server". Off needs a default machine other than this Mac. */
@@ -276,6 +293,7 @@ export class MachineConnections {
       behindPolicy: this.#behindPolicy,
       localServer: this.#localServer,
       defaultMachine: this.#defaultMachine,
+      multiMachine: this.#multiMachine,
     })
   }
 
@@ -379,6 +397,8 @@ export class MachineConnections {
     }
     const live = this.#live(stored)
     this.#machines.set(stored.machineId, live)
+    // Adding a machine turns multi-machine on (locked on while a machine is added).
+    this.#multiMachine = true
     this.#save()
     await this.#attempt(live).catch(() => undefined)
     const summary = this.list().find((entry) => entry.machineId === stored.machineId)

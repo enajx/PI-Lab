@@ -49,6 +49,9 @@ export const MACHINES_QUERY_KEY = ["desktop", "machines", "list"] as const
  * Whether machine UI (badges, the machine filter, the Machines group, the New
  * project machine picker, the default machine) shows: only once a machine is
  * added, so a single computer looks as before. The one place this rule lives.
+ * A machine added means the multi-machine toggle is on (adding turns it on,
+ * Off is refused while one is added), so while the toggle is off no machine
+ * UI shows; with the toggle on and no machine only Settings > Machines changes.
  */
 export function showMachineUi(machines: MachineSummary[]): boolean {
   return machines.length > 0
