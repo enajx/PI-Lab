@@ -1,7 +1,11 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    "paths": {
+      "@pi-lab/shared/*": ["../desktop/out/server-types/packages/shared/src/*.d.ts"],
+      "@pi-lab/*": ["../desktop/out/server-types/packages/*/src/index.d.ts"]
+    }
   },
   "include": ["index.ts", "App.tsx", "src/**/*.ts", "src/**/*.tsx"]
 }

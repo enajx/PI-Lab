@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "rm -rf ../desktop/out/server-types && ../../node_modules/.bin/tsc -p ../desktop/tsconfig.server-types.json && tsc --noEmit"
   },
   "dependencies": {
     "@react-navigation/elements": "^2.9.46",

@@ -13,7 +13,7 @@ type InstallStage =
   | "registering"
   | "complete"
   | "failed"
-interface InstallStatus {
+export interface InstallStatus {
   state: InstallStage
   progress: number | null
   message: string

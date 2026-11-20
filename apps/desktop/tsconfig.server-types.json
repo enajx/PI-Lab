@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "../..",
+    "outDir": "out/server-types",
+    "paths": {
+      "@pi-lab/shared/*": ["../../packages/shared/src/*.ts"],
+      "@pi-lab/*": ["../../packages/*/src/index.ts"]
+    }
+  },
+  "include": [],
+  "files": ["src/main/trpc/serverRouter.ts", "src/main/trpc/serverTypesSupport.ts"]
+}

@@ -7,7 +7,10 @@
 import { createTRPCClient, type TRPCClient } from "@trpc/client"
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react"
 import { AppState } from "react-native"
-import type { ServerRouter } from "../../desktop/src/main/trpc/serverRouter"
+// The router type comes from its declaration build (apps/desktop/
+// tsconfig.server-types.json, made by `npm run typecheck`), so this check does
+// not compile the desktop's server code under the phone's types.
+import type { ServerRouter } from "../../desktop/out/server-types/apps/desktop/src/main/trpc/serverRouter"
 import { ConnectionStatus, useStatusState } from "../../desktop/src/renderer/trpc/connectionStatus"
 import { createServerSockets } from "../../desktop/src/renderer/trpc/serverLinks"
 import { endpointFor, type ServerLogin } from "./logic/address"
