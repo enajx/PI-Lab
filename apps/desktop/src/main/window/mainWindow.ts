@@ -81,8 +81,9 @@ export function createMainWindow(
     window.setIgnoreMouseEvents(true)
   }
 
+  // Hidden test windows are still shown (transparent, click-through, without focus),
+  // so the app's visibility checks, such as the one Cmd+W uses, behave as for the user.
   window.once("ready-to-show", () => {
-    if (isTestMode && process.env.PI_LAB_TEST_HIDE_WINDOWS === "1") return
     if (isTestMode) window.showInactive()
     else window.show()
   })
